@@ -36,6 +36,16 @@ Founding offer: €25/month + inference and applicable tax.
 
 See it work: PUBLIC_URL
 
+## Freedom post
+
+Most AI assistants are rooms you rent in someone else’s house: their model, their servers, their rules.
+
+Your Agent is a home of your own. Open-source software you can read. The model you choose. A context designed to travel, with encrypted export built and full migration in testing.
+
+Freedom is the feature. And if you can leave any time, we have to earn every month you stay.
+
+PUBLIC_URL
+
 ## Usefulness post — pair with clip 1
 
 Less life admin. More room for life.

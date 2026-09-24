@@ -17,7 +17,7 @@
 }
 .reading-intro h1,
 .reading-article h1 {
-  font-weight: 500;
+  font-weight: 400;
   font-size: clamp(36px, 4.8vw, 66px);
   letter-spacing: -2px;
   line-height: 1.1;
@@ -35,19 +35,27 @@
   gap: 22px;
 }
 .reading-card {
+  background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 18px;
+  transition:
+    transform 0.25s,
+    box-shadow 0.25s;
   padding: 30px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+}
+.reading-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow);
 }
 .reading-card .eyebrow {
   margin-bottom: 16px;
 }
 .reading-card h2 {
   font-size: 27px;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 1.2;
   letter-spacing: -0.5px;
   margin: 0 0 16px;
@@ -75,9 +83,11 @@
 .direct-answer {
   font-size: 21px;
   line-height: 1.6;
-  border-left: 3px solid var(--blue);
-  padding: 18px 24px;
-  background: var(--pale);
+  font-family: var(--display);
+  border-left: 3px solid var(--sun);
+  padding: 22px 28px;
+  background: var(--card);
+  border-radius: 0 14px 14px 0;
   margin: 32px 0 46px;
 }
 .article-body {
@@ -88,7 +98,7 @@
   font-size: 29px;
   line-height: 1.25;
   letter-spacing: -0.6px;
-  font-weight: 500;
+  font-weight: 400;
   margin: 42px 0 18px;
 }
 .article-body p {
@@ -121,7 +131,7 @@
   min-width: 150px;
 }
 .article-body thead {
-  background: var(--pale);
+  background: var(--paper-deep);
 }
 .article-body caption {
   text-align: left;
@@ -137,24 +147,34 @@
 }
 .reading-cta {
   margin: 65px 0 48px;
-  padding: 40px;
-  background: var(--pale);
-  border-radius: 14px;
+  padding: 48px;
+  color: #fff;
+  background:
+    linear-gradient(90deg, #0b1733f2, #0b1733b3),
+    url("nordic-horizon.webp") center / cover no-repeat,
+    var(--night);
+  border-radius: var(--radius);
+}
+.reading-cta .eyebrow {
+  color: var(--sun);
+}
+.reading-cta .text-link {
+  color: var(--sun);
 }
 .reading-cta h2 {
   font-size: 30px;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 1.25;
   letter-spacing: -0.6px;
   margin: 0 0 16px;
 }
 .reading-cta p:not(.eyebrow) {
-  color: var(--muted);
+  color: #d5dcec;
   max-width: 640px;
 }
 .related-reading > h2 {
   font-size: 28px;
-  font-weight: 500;
+  font-weight: 400;
   margin-bottom: 24px;
 }
 .journal-teaser {
@@ -163,7 +183,7 @@
 .journal-teaser .reading-card h3 {
   font-size: 25px;
   line-height: 1.25;
-  font-weight: 500;
+  font-weight: 400;
   margin: 0 0 18px;
 }
 .journal-teaser .reading-card h3 a:hover {
@@ -174,9 +194,6 @@
   flex-wrap: wrap;
   gap: 24px;
   margin-top: 28px;
-}
-.reading-page .site-footer {
-  flex-wrap: wrap;
 }
 .article-body,
 .reading-card,
@@ -242,4 +259,13 @@
   .reading-main {
     padding-bottom: 40px;
   }
+}
+.reading-cta .button {
+  background: var(--sun);
+  border-color: var(--sun);
+  color: var(--night);
+}
+.reading-cta .button:hover {
+  background: #fff;
+  border-color: #fff;
 }
