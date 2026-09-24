@@ -449,7 +449,7 @@ test("provider, single-use bootstrap, DNS and health retry reach owner setup", a
   const hostname = (
     await db.query("SELECT hostname FROM tenants WHERE id=$1", [tenant])
   ).rows[0].hostname;
-  const app = await buildApp(c, [], db);
+  const app = await buildApp(c, db, []);
   ctx.after(() => app.close());
   let creates = 0;
   const remote = {
