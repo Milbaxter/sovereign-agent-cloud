@@ -1,5 +1,13 @@
 # Validation record
 
+## Storage encryption change — 24 September 2026
+
+The provider adapter now requests encrypted root storage. Provisioning checks affirmative encryption evidence on fresh server details before DNS/setup for both new and reconciled VMs. Live checkout additionally requires the new `storageEncryption` evidence entry, which remains unset.
+
+Local validation for this change: all 53 tests pass on Node 26 with a dedicated disposable PostgreSQL 15 cluster; typecheck, production build, and formatting checks pass. The nine added tests cover the outgoing provider request, missing/negative/mixed disk evidence, new/adopted VM gating and retries, and the independent release gate. The existing CI workflow runs Node 24 with PostgreSQL 17 and the packaged lifecycle smoke test. Docker was unavailable locally, so the packaged smoke test was not rerun locally for this change.
+
+No live UpCloud resources were created or inspected for this change. Provider responses in tests are synthetic. Existing disks are not migrated, later disk changes are not continuously monitored, and no encryption-at-rest or zero-knowledge production claim is established by these tests. Follow the evidence and migration procedure in [operations](OPERATIONS.md#disk-encryption-and-launch-evidence).
+
 Implementation date: 2026-09-24.
 
 ## Verified locally

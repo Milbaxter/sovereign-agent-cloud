@@ -100,6 +100,7 @@ export function launchGate(c: Config, credits = false) {
     const evidence = JSON.parse(readFileSync(c.RELEASE_EVIDENCE_FILE, "utf8"));
     for (const name of [
       "paidProvisioning",
+      "storageEncryption",
       "byokOnboarding",
       "creditOnboarding",
       "channels",
