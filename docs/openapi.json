@@ -229,7 +229,8 @@
           {
             "session": []
           }
-        ]
+        ],
+        "description": "Wallet includes usageReviewRequired. When true, managed inference is paused pending provider billing reconciliation; reserved funds remain held and top-ups do not clear the review."
       }
     },
     "/api/checkout": {
@@ -513,7 +514,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Suspended VMs are offline. Returns 409 AGENT_OFFLINE_CONTACT_SUPPORT_FOR_EXPORT during retention; the owner can request an operator-assisted export."
       }
     },
     "/api/tenants/{id}/ssh-key": {
@@ -702,7 +704,7 @@
             "description": "Launch gate closed or dependency unavailable"
           },
           "402": {
-            "description": "Insufficient unreserved credit or outstanding debt"
+            "description": "Insufficient unreserved credit, outstanding debt, or usage reconciliation required"
           }
         },
         "security": [

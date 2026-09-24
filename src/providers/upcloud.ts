@@ -153,6 +153,21 @@ export class UpCloud {
     if (s.state !== "stopped") throw Error("PROVIDER_TRANSITIONING");
     await this.call(`/server/${id}/start`, "POST", { start_server: {} });
   }
+  async changeStoppedPlan(id: string, plan: string) {
+    const s = await this.details(id);
+    if (s.state !== "stopped") throw Error("WAITING_FOR_STOP");
+    if (s.plan !== plan)
+      await this.call(`/server/${id}`, "PUT", { server: { plan } });
+    const verified = await this.details(id);
+    if (verified.state !== "stopped" || verified.plan !== plan)
+      throw Error("PROVIDER_PLAN_NOT_CONFIRMED");
+  }
+  async park(id: string) {
+    await this.stop(id);
+    // Starter/Premium are billed even when stopped. Keep the existing disks
+    // and address, but use a stopped Cloud Native plan during retention.
+    await this.changeStoppedPlan(id, "CLOUDNATIVE-1xCPU-4GB");
+  }
   async destroy(id: string, disks: string[]) {
     try {
       const s = await this.details(id);

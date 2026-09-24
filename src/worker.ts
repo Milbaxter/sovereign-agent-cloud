@@ -4,7 +4,7 @@ import type { Config, Model } from "./config.js";
 import { Billing } from "./billing.js";
 import { Provisioner, tenantCall } from "./provision.js";
 import { Backups } from "./backup.js";
-import { releaseUnknown } from "./ledger.js";
+import { quarantineStaleUsage } from "./ledger.js";
 export class Worker {
   readonly provisioner: Provisioner;
   readonly billing: Billing;
@@ -82,6 +82,28 @@ export class Worker {
   async handle(kind: string, p: any) {
     if (kind === "stripe") return this.billing.handle(p.type, p.id);
     if (kind === "provision") return this.provisioner.provision(p.tenantId);
+    // Serialize lifecycle operations with provisioning and each other, including
+    // duplicate jobs after a lost lease. Never race a resume against a stop.
+    const conn = await this.db.connect();
+    let locked = false;
+    try {
+      locked = (
+        await conn.query(
+          "SELECT pg_try_advisory_lock(hashtext($1)) AS locked",
+          [p.tenantId],
+        )
+      ).rows[0].locked;
+      if (!locked) throw Error("TENANT_BUSY");
+      await this.lifecycle(kind, p);
+    } finally {
+      if (locked)
+        await conn.query("SELECT pg_advisory_unlock(hashtext($1))", [
+          p.tenantId,
+        ]);
+      conn.release();
+    }
+  }
+  async lifecycle(kind: string, p: any) {
     let t = (
       await this.db.query("SELECT * FROM tenants WHERE id=$1", [p.tenantId])
     ).rows[0];
@@ -91,29 +113,59 @@ export class Worker {
       t = (await this.db.query("SELECT * FROM tenants WHERE id=$1", [t.id]))
         .rows[0];
     }
-    if (kind === "backup") return this.backups.take(t);
+    if (kind === "backup") {
+      if (["ready", "awaiting_setup"].includes(t.state))
+        return this.backups.take(t);
+      return;
+    }
     if (kind === "suspend") {
       if (
         new Date(t.paid_until).getTime() > Date.now() ||
         new Date(t.grace_until).getTime() > Date.now()
       )
         return;
-      if (t.state === "suspended") return;
-      try {
-        await this.backups.take(t);
-      } catch {
-        await incident(
-          this.db,
-          `suspend-backup:${t.id}`,
-          "final_backup_failed",
+      if (!t.provider_id) throw Error("PROVIDER_ID_REQUIRED");
+      if (!t.resume_plan) {
+        const remote = await this.provisioner.cloud.details(t.provider_id);
+        if (remote.hostname !== t.hostname)
+          throw Error("PROVIDER_OWNERSHIP_MISMATCH");
+        if (!remote.plan || remote.plan === "custom")
+          throw Error("RESUME_PLAN_REQUIRED");
+        await this.db.query("UPDATE tenants SET resume_plan=$2 WHERE id=$1", [
           t.id,
-        );
+          remote.plan,
+        ]);
       }
-      await tenantCall(this.c, t, "suspend", {});
+      // Record suspension before external operations so API access stops even
+      // if the tenant is unreachable or the cloud operation needs a retry.
       await this.db.query(
-        "UPDATE tenants SET state='suspended',suspended_at=now(),delete_after=now()+interval '30 days' WHERE id=$1",
+        "UPDATE tenants SET state='suspended',suspended_at=COALESCE(suspended_at,now()),delete_after=COALESCE(delete_after,now()+interval '30 days') WHERE id=$1",
         [t.id],
       );
+      if (t.state !== "suspended") {
+        try {
+          await this.backups.take(t);
+        } catch {
+          await incident(
+            this.db,
+            `suspend-backup:${t.id}`,
+            "final_backup_failed",
+            t.id,
+          );
+        }
+        try {
+          await tenantCall(this.c, t, "suspend", {});
+        } catch {
+          await incident(
+            this.db,
+            `suspend-agent:${t.id}`,
+            "tenant_suspend_failed",
+            t.id,
+          );
+        }
+      }
+      // Cloud shutdown is mandatory even if the agent or backup endpoint fails.
+      await this.provisioner.cloud.park(t.provider_id);
       return;
     }
     if (kind === "resume") {
@@ -125,9 +177,31 @@ export class Worker {
         )
       )
         return;
+      if (!t.provider_id) throw Error("PROVIDER_ID_REQUIRED");
+      const remote = await this.provisioner.cloud.details(t.provider_id);
+      if (remote.hostname !== t.hostname)
+        throw Error("PROVIDER_OWNERSHIP_MISMATCH");
+      // Upgrade path for a tenant suspended by the old container-only flow.
+      if (!t.resume_plan) {
+        if (!remote.plan || remote.plan === "custom")
+          throw Error("RESUME_PLAN_REQUIRED");
+        t.resume_plan = remote.plan;
+        await this.db.query("UPDATE tenants SET resume_plan=$2 WHERE id=$1", [
+          t.id,
+          t.resume_plan,
+        ]);
+      }
+      if (remote.plan !== t.resume_plan) {
+        await this.provisioner.cloud.stop(t.provider_id);
+        await this.provisioner.cloud.changeStoppedPlan(
+          t.provider_id,
+          t.resume_plan,
+        );
+      }
+      await this.provisioner.cloud.start(t.provider_id);
       await tenantCall(this.c, t, "resume", {});
       await this.db.query(
-        "UPDATE tenants SET state='awaiting_setup',suspended_at=NULL,delete_after=NULL WHERE id=$1",
+        "UPDATE tenants SET state='awaiting_setup',suspended_at=NULL,delete_after=NULL,resume_plan=NULL,error_code=NULL WHERE id=$1",
         [t.id],
       );
       return;
@@ -161,7 +235,7 @@ export class Worker {
     throw Error("UNKNOWN_JOB");
   }
   async maintenance() {
-    await releaseUnknown(this.db);
+    await quarantineStaleUsage(this.db);
     await this.db.query("DELETE FROM login_tokens WHERE expires_at<now()");
     await this.db.query("DELETE FROM sessions WHERE expires_at<now()");
     const abandoned = (
@@ -275,6 +349,16 @@ export class Worker {
           );
         }
       }
+      if (
+        t.state === "suspended" &&
+        !(
+          new Date(t.paid_until).getTime() > Date.now() ||
+          new Date(t.grace_until).getTime() > Date.now()
+        )
+      )
+        await enqueue(this.db, `park:${t.id}:${date}`, "suspend", {
+          tenantId: t.id,
+        });
       if (
         ["suspended", "deleting"].includes(t.state) &&
         t.delete_after &&

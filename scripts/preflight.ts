@@ -40,6 +40,10 @@ if (c.UPCLOUD_TOKEN) {
       ),
     );
     check(
+      "Stopped retention plan available",
+      plans.some((p: any) => p.name === "CLOUDNATIVE-1xCPU-4GB"),
+    );
+    check(
       "Ubuntu 24.04 template",
       templates.some(
         (t: any) =>

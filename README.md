@@ -9,7 +9,7 @@ A small control service for paid, dedicated UpCloud VMs running **unmodified Ope
 - Verified email access, a small account portal, signed Stripe webhooks, durable PostgreSQL jobs, account-bound checkout, and subscription lifecycle handling.
 - One UpCloud VM per trusted owner/group, cloud-init bootstrap, DNS-only Cloudflare records, HTTPS, browser-based stock OpenClaw onboarding, and owner device pairing.
 - BYOK isolation plus an OpenAI-compatible EU inference gateway, €10 prepaid top-ups, versioned 25%-markup rates, atomic spending reservations, refunds/disputes, and usage reconciliation.
-- Encrypted complete state exports, seven daily Finnish backups, migration instructions, suspended-account export, retention/deletion jobs, and rollback tooling.
+- Encrypted complete state exports, seven daily Finnish backups, migration instructions, operator-assisted suspended-account export, retention/deletion jobs, and rollback tooling.
 - Public OpenAPI contract, Docker deployments, PostgreSQL integration tests, and CI/image publishing workflows.
 
 The marketing website is included at **`/welcome/`**, with the existing account portal at **`/`**. Its purchase link passes the selected inference mode to the portal; verified email access and server-bound Checkout Sessions remain the only purchase path. Read [the website handoff](docs/WEBSITE-INTEGRATION.md) and [launch materials](docs/marketing/README.md). Stripe products still need configuration; the previous standalone Payment Link suggestion is superseded.

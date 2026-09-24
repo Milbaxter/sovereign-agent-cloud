@@ -13,7 +13,7 @@ docker run --rm --network none -v "$fixture:/host" --entrypoint sh "$image" -c '
   result=$?
   chmod -R a+rwX /host
   exit "$result"
-' 
+'
 bash -n "$fixture/opt/sac/firewall.sh" "$fixture/usr/local/bin/sac-onboard"
 docker run --rm --network none -v "$fixture/etc/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
 printf '%s\n' 'Production bootstrap renders valid Caddy and shell configuration.'
