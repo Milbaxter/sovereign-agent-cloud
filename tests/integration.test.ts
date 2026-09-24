@@ -1378,7 +1378,7 @@ test("unresolved usage rejects HTTP inference before another provider call", asy
 test("suspension parks compute despite unreachable tenant and backup, and retries safely", async (t) => {
   const { Worker } = await import("../src/worker.js");
   await db.query(
-    "UPDATE tenants SET paid_until=now()-interval '1 day',provider_id='vm1' WHERE id=$1",
+    "UPDATE tenants SET paid_until=now()-interval '1 day',provider_id='vm1',provider_hostname=hostname,hostname='a-test.203-0-113-2.sslip.io' WHERE id=$1",
     [tenant],
   );
   const worker = new Worker(db, c, [model]);
@@ -1419,7 +1419,7 @@ test("suspension parks compute despite unreachable tenant and backup, and retrie
 test("paid recovery restores saved plan before starting and survives an HTTP retry", async (t) => {
   const { Worker } = await import("../src/worker.js");
   await db.query(
-    "UPDATE tenants SET state='suspended',provider_id='vm1',resume_plan='STARTER-2xCPU-4GB',suspended_at=now(),delete_after=now()+interval '30 days' WHERE id=$1",
+    "UPDATE tenants SET state='suspended',provider_id='vm1',provider_hostname=hostname,hostname='a-test.203-0-113-2.sslip.io',resume_plan='STARTER-2xCPU-4GB',suspended_at=now(),delete_after=now()+interval '30 days' WHERE id=$1",
     [tenant],
   );
   const worker = new Worker(db, c, [model]);
@@ -1445,7 +1445,8 @@ test("paid recovery restores saved plan before starting and survives an HTTP ret
     state = "started";
     actions.push("start");
   };
-  t.mock.method(globalThis, "fetch", async () => {
+  t.mock.method(globalThis, "fetch", async (url: string) => {
+    assert.equal(url, "https://a-test.203-0-113-2.sslip.io/internal/resume");
     actions.push("resume-agent");
     if (++http === 1) throw Error("BOOTING");
     return Response.json({ ok: true });
