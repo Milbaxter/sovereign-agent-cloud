@@ -1,8 +1,47 @@
 import type { Config } from "../config.js";
+export type UpCloudConfig = Pick<
+  Config,
+  | "UPCLOUD_TOKEN"
+  | "UPCLOUD_ZONE"
+  | "UPCLOUD_PLAN"
+  | "UPCLOUD_TEMPLATE"
+  | "ADMIN_SSH_PUBLIC_KEY"
+  | "BILLING_MODE"
+>;
+
+// Explicit provider rejections are safe to retry after correcting configuration.
+// Timeouts, transport failures and 5xx responses remain ambiguous.
+export function createRejected(error: { status?: number }) {
+  return [400, 401, 402, 403, 404, 409, 422, 429].includes(error.status ?? 0);
+}
+
+// Server detail responses use storage_encrypted, not the create field encrypted.
+// This service provisions only disk devices; missing or unknown evidence fails closed.
+export function assertEncryptedStorage(server: any) {
+  const devices = server.storage_devices?.storage_device;
+  if (
+    !Array.isArray(devices) ||
+    devices.length === 0 ||
+    devices.some(
+      (device: any) =>
+        !device ||
+        device.type !== "disk" ||
+        typeof device.storage !== "string" ||
+        !device.storage.trim() ||
+        device.storage_encrypted !== "yes",
+    )
+  )
+    throw Error("PROVIDER_STORAGE_ENCRYPTION_UNVERIFIED");
+}
+
 export class UpCloud {
-  constructor(readonly c: Config) {}
+  constructor(
+    readonly c: UpCloudConfig,
+    readonly request: typeof fetch = fetch,
+  ) {}
   async call(path: string, method = "GET", body?: unknown): Promise<any> {
-    const res = await fetch(`https://api.upcloud.com/1.3${path}`, {
+    if (!this.c.UPCLOUD_TOKEN.trim()) throw Error("UPCLOUD_TOKEN_REQUIRED");
+    const res = await this.request(`https://api.upcloud.com/1.3${path}`, {
       method,
       headers: {
         authorization: `Bearer ${this.c.UPCLOUD_TOKEN}`,
@@ -11,17 +50,30 @@ export class UpCloud {
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(30_000),
     });
-    if (!res.ok)
-      throw Object.assign(Error(`UPCLOUD_${res.status}`), {
-        status: res.status,
-      });
+    if (!res.ok) {
+      const data: any = await res.json().catch(() => null);
+      const rawCode = data?.error?.error_code;
+      // Never propagate descriptions or response bodies: they can echo inputs.
+      const errorCode =
+        typeof rawCode === "string" && /^[A-Z0-9_-]{1,100}$/.test(rawCode)
+          ? rawCode.replaceAll("-", "_")
+          : undefined;
+      throw Object.assign(
+        Error(`UPCLOUD_${res.status}${errorCode ? `_${errorCode}` : ""}`),
+        {
+          status: res.status,
+          errorCode,
+        },
+      );
+    }
     return res.status === 204 ? null : res.json();
   }
   async list() {
     const all: any[] = [];
     for (let offset = 0; ; offset += 100) {
       const result = await this.call(`/server?limit=100&offset=${offset}`),
-        rows = result.servers?.server ?? [];
+        rows = result.servers?.server;
+      if (!Array.isArray(rows)) throw Error("UPCLOUD_INVALID_INVENTORY");
       all.push(...rows);
       if (rows.length < 100) break;
       if (offset > 10000) throw Error("UPCLOUD_PAGINATION_LIMIT");
@@ -41,8 +93,11 @@ export class UpCloud {
           plan: this.c.UPCLOUD_PLAN,
           title: `sac-${this.c.BILLING_MODE}-${tenantId}`,
           hostname,
-          metadata: "no",
-          firewall: "off",
+          // Required by UpCloud cloud-init templates. Tenant container egress to
+          // the link-local metadata endpoint is blocked by the host firewall.
+          metadata: "yes",
+          // Trial accounts require this firewall; host rules add isolation.
+          firewall: "on",
           login_user: {
             username: "root",
             create_password: "no",
@@ -62,6 +117,7 @@ export class UpCloud {
             storage_device: [
               {
                 action: "clone",
+                encrypted: "yes",
                 storage: this.c.UPCLOUD_TEMPLATE,
                 size: 30,
                 tier: "standard",
@@ -96,6 +152,21 @@ export class UpCloud {
     if (s.state === "started") return;
     if (s.state !== "stopped") throw Error("PROVIDER_TRANSITIONING");
     await this.call(`/server/${id}/start`, "POST", { start_server: {} });
+  }
+  async changeStoppedPlan(id: string, plan: string) {
+    const s = await this.details(id);
+    if (s.state !== "stopped") throw Error("WAITING_FOR_STOP");
+    if (s.plan !== plan)
+      await this.call(`/server/${id}`, "PUT", { server: { plan } });
+    const verified = await this.details(id);
+    if (verified.state !== "stopped" || verified.plan !== plan)
+      throw Error("PROVIDER_PLAN_NOT_CONFIRMED");
+  }
+  async park(id: string) {
+    await this.stop(id);
+    // Starter/Premium are billed even when stopped. Keep the existing disks
+    // and address, but use a stopped Cloud Native plan during retention.
+    await this.changeStoppedPlan(id, "CLOUDNATIVE-1xCPU-4GB");
   }
   async destroy(id: string, disks: string[]) {
     try {

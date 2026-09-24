@@ -17,7 +17,7 @@ const run = (fn) => async (e) => {
   } catch (err) {
     notice(
       err.message === "FRESH_LOGIN_REQUIRED"
-        ? "Request a new sign-in link before exporting, changing SSH access, or cancelling."
+        ? "Request a new sign-in link before exporting, changing SSH access, opening billing, or cancelling."
         : err.message,
     );
   }
@@ -77,6 +77,9 @@ async function refresh() {
   $("#model").disabled = t?.state === "pending_payment";
   $("#balance").textContent =
     `Balance: €${(Number(me.wallet.balance) / 1e6).toFixed(2)}. Reserved for requests: €${(Number(me.wallet.reserved) / 1e6).toFixed(4)}.${Number(me.wallet.debt) > 0 ? " Payment reversal outstanding; inference is paused." : ""}`;
+  if (me.wallet.usageReviewRequired)
+    $("#balance").textContent +=
+      " AI usage is paused while a provider charge is reviewed. Reserved funds remain held; buying more credits will not clear this review. Contact support.";
   const area = $("#agent");
   const signature = JSON.stringify(t ?? null);
   if (signature !== renderedAgent) area.replaceChildren();
@@ -111,11 +114,18 @@ async function refresh() {
     ex.append(label);
     const submit = document.createElement("button");
     submit.textContent = "Export complete agent";
+    submit.disabled = !["awaiting_setup", "ready"].includes(t.state);
     ex.append(submit);
     ex.onsubmit = run(() =>
       jump(`/api/tenants/${t.id}/export`, { recipient: key.value.trim() }),
     );
     section.append(ex);
+    if (t.state === "suspended") {
+      const notice = document.createElement("p");
+      notice.textContent =
+        "Your server is offline. Data is retained for 30 days after suspension. Renew to resume, or contact support for an export during retention.";
+      section.append(notice);
+    }
     const ssh = document.createElement("form");
     const sl = document.createElement("label");
     sl.textContent = "SSH public key (Ed25519)";
@@ -132,6 +142,7 @@ async function refresh() {
     ssh.append(ipLabel);
     const sb = document.createElement("button");
     sb.textContent = "Add SSH key";
+    sb.disabled = !["awaiting_setup", "ready"].includes(t.state);
     ssh.append(sb);
     ssh.onsubmit = run(async () => {
       await api(`/api/tenants/${t.id}/ssh-key`, {

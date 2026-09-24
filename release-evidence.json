@@ -1,5 +1,7 @@
 {
+  "productionSecurity": {"passed": false, "evidence": ""},
   "paidProvisioning": {"passed": false, "evidence": ""},
+  "storageEncryption": {"passed": false, "evidence": ""},
   "byokOnboarding": {"passed": false, "evidence": ""},
   "creditOnboarding": {"passed": false, "evidence": ""},
   "channels": {"passed": false, "evidence": ""},

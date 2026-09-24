@@ -24,6 +24,8 @@ All material is draft and unposted. Set `PUBLIC_URL` to the eventual public `/we
 
 ## Honest claims
 
+Follow the [personal knowledge direction](../PERSONAL-KNOWLEDGE.md) and [privacy/security claims policy](../PRIVACY-SECURITY.md). Lead with “See what it knows. Change it. Take it with you.” as a clearly labeled product goal until the relevant controls pass acceptance. Editable knowledge, scoped access, knowledge-only export/import, and a device-held-key vault remain planned; do not present them as delivered. Preserve the distinction between an encrypted archive, encrypted live storage, and a service whose operator cannot read data.
+
 The source is now public under Apache-2.0. This does not make every model open source or establish local inference, production hosting, complete restoration, or security acceptance. OpenClaw and third-party models retain their licenses. The walkthrough and downloadable JSON are explicitly illustrative, not live product evidence. Do not copy the illustrative export over the backend's encrypted real export.
 
 The founder offer remains €25/month plus inference and applicable tax, with a proposed 12-month base-price guarantee for the first 50 customers. The backend limits distinct paid/reserved accounts, retains paid founders after deletion, and releases abandoned unpaid reservations. This is an account limit, not proof of unique real-world people; verify commercial terms and the configured limit before publishing the offer.

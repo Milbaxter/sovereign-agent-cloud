@@ -11,12 +11,13 @@ import {
   reserve,
   settle,
   price,
-  releaseUnknown,
+  quarantineStaleUsage,
 } from "../src/ledger.js";
 import { hash, token, seal, unseal, handoff } from "../src/crypto.js";
 import { Billing } from "../src/billing.js";
 import { buildApp } from "../src/app.js";
 import { Provisioner } from "../src/provision.js";
+import { UpCloud } from "../src/providers/upcloud.js";
 import { consumeTicket } from "../src/tenant/tickets.js";
 import { UsageStream } from "../src/inference.js";
 import { launchGate, type Config, type Model } from "../src/config.js";
@@ -47,6 +48,7 @@ const c = {
   TENANT_IMAGE:
     "ghcr.io/milbaxter/sovereign-agent-cloud:test@sha256:" + "b".repeat(64),
   UPCLOUD_PLAN: "test",
+  UPCLOUD_TOKEN: "test-token",
   UPCLOUD_TEMPLATE: "test",
   ADMIN_CIDR: "203.0.113.1/32",
   ADMIN_SSH_PUBLIC_KEY: "ssh-ed25519 TEST",
@@ -136,7 +138,7 @@ test("settlement is idempotent and releases unused reserve", async () => {
   assert.equal(w.balance, "9750");
   assert.equal(w.reserved, "0");
 });
-test("unknown usage holds funds then is waived without inventing a charge", async () => {
+test("unknown usage holds funds beyond 24 hours and blocks reuse until reconciled", async () => {
   await transaction(db, (tx) => credit(tx, account, "topup", 10000n));
   const id = await reserve(db, account, tenant, model, 1000);
   await settle(db, id, model, null);
@@ -145,14 +147,44 @@ test("unknown usage holds funds then is waived without inventing a charge", asyn
     "unknown",
   );
   await db.query("UPDATE requests SET created_at=now()-interval '25 hours'");
-  await releaseUnknown(db);
+  await quarantineStaleUsage(db);
+  await quarantineStaleUsage(db);
   const w = (await db.query("SELECT * FROM wallets")).rows[0];
   assert.equal(w.balance, "10000");
-  assert.equal(w.reserved, "0");
+  assert.equal(w.reserved, "2500");
   assert.equal(
     (await db.query("SELECT state FROM requests")).rows[0].state,
-    "waived",
+    "unknown",
   );
+  await assert.rejects(
+    reserve(db, account, tenant, model, 1000),
+    /USAGE_RECONCILIATION_REQUIRED/,
+  );
+  await transaction(db, (tx) => credit(tx, account, "extra-topup", 10000n));
+  await assert.rejects(
+    reserve(db, account, tenant, model, 1000),
+    /USAGE_RECONCILIATION_REQUIRED/,
+  );
+  await settle(
+    db,
+    id,
+    {
+      ...model,
+      rateVersion: "new-version",
+      outputMicroEurPerMillion: 999999999n,
+    },
+    { prompt_tokens: 100, completion_tokens: 100 },
+    "provider-record-123",
+  );
+  const reconciled = (await db.query("SELECT * FROM wallets")).rows[0];
+  assert.equal(reconciled.balance, "19750");
+  assert.equal(reconciled.reserved, "0");
+  assert.equal(
+    (await db.query("SELECT metadata FROM ledger WHERE kind='usage'")).rows[0]
+      .metadata.reconciliationEvidence,
+    "provider-record-123",
+  );
+  await reserve(db, account, tenant, model, 1000);
 });
 test("refund during a request records debt without negative balances", async () => {
   const order = randomUUID();
@@ -334,14 +366,17 @@ test("cross-account access and CSRF are rejected", async () => {
     let r = await app.inject({
       method: "POST",
       url: `/api/tenants/${tenant}/access`,
-      headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+      headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
       payload: {},
     });
     assert.equal(r.statusCode, 404);
     r = await app.inject({
       method: "POST",
       url: "/api/auth/logout",
-      headers: { origin: "https://evil.test", cookie: `session=${session}` },
+      headers: {
+        origin: "https://evil.test",
+        cookie: `__Host-session=${session}`,
+      },
       payload: {},
     });
     assert.equal(r.statusCode, 403);
@@ -360,7 +395,7 @@ test("fresh authentication required for credential-bearing export", async () => 
     const r = await app.inject({
       method: "POST",
       url: `/api/tenants/${tenant}/export`,
-      headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+      headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
       payload: { recipient: "age1" + "a".repeat(58) },
     });
     assert.equal(r.statusCode, 403);
@@ -406,6 +441,143 @@ test("uncertain provider create is never blindly retried", async () => {
   await assert.rejects(provisioner.provision(tenant), /RECONCILIATION/);
   assert.equal(creates, 1);
 });
+test("explicit UpCloud rejection clears credentials and allows a corrected retry", async () => {
+  await db.query("UPDATE tenants SET state='provisioning' WHERE id=$1", [
+    tenant,
+  ]);
+  let creates = 0;
+  const cloud = {
+    find: async () => null,
+    create: async () => {
+      creates++;
+      throw Object.assign(
+        Error("UPCLOUD_409_METADATA_DISABLED_ON_CLOUD_INIT"),
+        { status: 409 },
+      );
+    },
+  };
+  const provisioner = new Provisioner(db, c, [model], cloud as any, {} as any);
+  for (let i = 0; i < 2; i++) {
+    await assert.rejects(provisioner.provision(tenant), /UPCLOUD_409/);
+    const row = (await db.query("SELECT * FROM tenants WHERE id=$1", [tenant]))
+      .rows[0];
+    for (const field of [
+      "create_attempted_at",
+      "bootstrap_hash",
+      "bootstrap_expires_at",
+      "bundle_cipher",
+      "inference_key_hash",
+      "inference_key_cipher",
+    ])
+      assert.equal(row[field], null);
+  }
+  assert.equal(creates, 2);
+});
+
+test("provider, single-use bootstrap, DNS and health retry reach owner setup", async (ctx) => {
+  await db.query(
+    "UPDATE tenants SET state='provisioning',mode='byok' WHERE id=$1",
+    [tenant],
+  );
+  const hostname = (
+    await db.query("SELECT hostname FROM tenants WHERE id=$1", [tenant])
+  ).rows[0].hostname;
+  const app = await buildApp(c, db, []);
+  ctx.after(() => app.close());
+  let creates = 0;
+  const remote = {
+    uuid: "vm-e2e",
+    hostname,
+    ip_addresses: {
+      ip_address: [
+        { access: "public", family: "IPv4", address: "203.0.113.2" },
+      ],
+    },
+    storage_devices: {
+      storage_device: [
+        { storage: "disk-e2e", type: "disk", storage_encrypted: "yes" },
+      ],
+    },
+  };
+  const cloud = new UpCloud(
+    { ...c, UPCLOUD_TOKEN: "test-token" },
+    async (url, init) => {
+      if (init?.method === "POST") {
+        creates++;
+        const { server } = JSON.parse(String(init.body));
+        assert.equal(server.metadata, "yes");
+        assert.ok(server.user_data.startsWith("#!/bin/bash"));
+        assert.ok(!server.user_data.includes("# BOOTSTRAP_VARIABLES"));
+        const payload = {
+          token: server.user_data.match(/BOOTSTRAP_TOKEN='([^']+)'/)[1],
+        };
+        const response = await app.inject({
+          method: "POST",
+          url: `/bootstrap/${tenant}`,
+          payload,
+        });
+        assert.equal(response.statusCode, 200);
+        assert.equal(response.json().managementKey, "secret");
+        assert.equal(response.json().tenantId, tenant);
+        assert.equal(response.json().mode, "byok");
+        assert.equal(
+          (
+            await app.inject({
+              method: "POST",
+              url: `/bootstrap/${tenant}`,
+              payload,
+            })
+          ).statusCode,
+          403,
+        );
+        return new Response(JSON.stringify({ server: remote }), {
+          status: 202,
+        });
+      }
+      return new Response(
+        JSON.stringify(
+          String(url).includes("?")
+            ? { servers: { server: [] } }
+            : { server: remote },
+        ),
+      );
+    },
+  );
+  let healthReady = false;
+  ctx.mock.method(
+    globalThis,
+    "fetch",
+    async (url: string, init: RequestInit) => {
+      assert.equal(url, `https://${hostname}/internal/status`);
+      assert.equal(
+        new Headers(init.headers).get("authorization"),
+        "Bearer secret",
+      );
+      return new Response(JSON.stringify({ installed: healthReady }));
+    },
+  );
+  const dns = {
+    ensure: async (name: string, ip: string) => {
+      assert.equal(name, hostname);
+      assert.equal(ip, "203.0.113.2");
+      return "dns-e2e";
+    },
+  };
+  const provisioner = new Provisioner(db, c, [], cloud, dns as any);
+  await assert.rejects(provisioner.provision(tenant), /WAITING_FOR_BOOTSTRAP/);
+  healthReady = true;
+  await provisioner.provision(tenant);
+  const row = (await db.query("SELECT * FROM tenants WHERE id=$1", [tenant]))
+    .rows[0];
+  assert.equal(creates, 1);
+  assert.equal(row.state, "awaiting_setup");
+  assert.equal(row.provider_id, "vm-e2e");
+  assert.deepEqual(row.disk_ids, ["disk-e2e"]);
+  assert.equal(row.dns_id, "dns-e2e");
+  assert.equal(row.bootstrap_hash, null);
+  assert.equal(row.bundle_cipher, null);
+});
+
 test("provider retry finds VM after response loss without creating again", async () => {
   await db.query(
     "UPDATE tenants SET state='provisioning',create_attempted_at=now() WHERE id=$1",
@@ -420,7 +592,11 @@ test("provider retry finds VM after response loss without creating again", async
       uuid: "vm1",
       hostname,
       ip_addresses: { ip_address: [] },
-      storage_devices: { storage_device: [{ storage: "disk1" }] },
+      storage_devices: {
+        storage_device: [
+          { storage: "disk1", type: "disk", storage_encrypted: "yes" },
+        ],
+      },
     }),
     create: async () => {
       creates++;
@@ -450,6 +626,79 @@ test("live checkout cannot be enabled without acceptance evidence", () => {
   );
 });
 
+for (const adopted of [false, true]) {
+  for (const encrypted of ["yes", "no", undefined]) {
+    test(`${adopted ? "adopted" : "new"} VM with encryption ${encrypted} is verified before DNS and setup`, async (t) => {
+      await db.query(
+        "UPDATE tenants SET mode='byok',state='provisioning' WHERE id=$1",
+        [tenant],
+      );
+      const hostname = (await db.query("SELECT hostname FROM tenants")).rows[0]
+        .hostname;
+      let creates = 0;
+      let dnsCalls = 0;
+      let healthCalls = 0;
+      t.mock.method(globalThis, "fetch", async (url: string) => {
+        assert.equal(url, `https://${hostname}/internal/status`);
+        healthCalls++;
+        return Response.json({ installed: true });
+      });
+      const cloud = {
+        find: async () => (adopted ? { uuid: "vm1" } : null),
+        create: async () => {
+          creates++;
+          return { uuid: "vm1" };
+        },
+        details: async () => ({
+          uuid: "vm1",
+          hostname,
+          ip_addresses: {
+            ip_address: [
+              { access: "public", family: "IPv4", address: "203.0.113.2" },
+            ],
+          },
+          storage_devices: {
+            storage_device: [
+              { storage: "disk1", type: "disk", storage_encrypted: encrypted },
+            ],
+          },
+        }),
+      };
+      const dns = {
+        ensure: async () => {
+          dnsCalls++;
+          return "dns1";
+        },
+      };
+      const provisioner = new Provisioner(db, c, [], cloud as any, dns as any);
+      if (encrypted === "yes") await provisioner.provision(tenant);
+      else {
+        await assert.rejects(
+          provisioner.provision(tenant),
+          /PROVIDER_STORAGE_ENCRYPTION_UNVERIFIED/,
+        );
+        // Retried provisioning adopts the recorded VM and never creates a second one.
+        await assert.rejects(
+          provisioner.provision(tenant),
+          /PROVIDER_STORAGE_ENCRYPTION_UNVERIFIED/,
+        );
+      }
+      const row = (
+        await db.query("SELECT * FROM tenants WHERE id=$1", [tenant])
+      ).rows[0];
+      assert.equal(row.provider_id, "vm1");
+      assert.deepEqual(row.disk_ids, ["disk1"]);
+      assert.equal(creates, adopted ? 0 : 1);
+      assert.equal(dnsCalls, encrypted === "yes" ? 1 : 0);
+      assert.equal(healthCalls, encrypted === "yes" ? 1 : 0);
+      assert.equal(
+        row.state,
+        encrypted === "yes" ? "awaiting_setup" : "provisioning",
+      );
+    });
+  }
+}
+
 test("email verification tokens are single-use and sessions contain only hashes", async () => {
   const secret = token();
   await db.query(
@@ -466,7 +715,11 @@ test("email verification tokens are single-use and sessions contain only hashes"
     };
     const r = await app.inject(request);
     assert.equal(r.statusCode, 200);
+    assert.match(String(r.headers["set-cookie"]), /^__Host-session=/);
     assert.match(String(r.headers["set-cookie"]), /HttpOnly/);
+    assert.match(String(r.headers["set-cookie"]), /Secure/);
+    assert.match(String(r.headers["set-cookie"]), /Path=\//);
+    assert.doesNotMatch(String(r.headers["set-cookie"]), /Domain=/i);
     assert.equal((await app.inject(request)).statusCode, 401);
     assert.equal((await db.query("SELECT * FROM login_tokens")).rowCount, 0);
     assert.equal(
@@ -840,7 +1093,7 @@ test("expired entitlement denies new access before the lifecycle worker catches 
   const request = {
     method: "POST" as const,
     url: `/api/tenants/${tenant}/access`,
-    headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+    headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
     payload: {},
   };
   assert.equal((await app.inject(request)).statusCode, 409);
@@ -945,7 +1198,7 @@ test("paid founders retain cohort places after deletion; abandoned unpaid accoun
   const request = {
     method: "POST" as const,
     url: "/api/checkout",
-    headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+    headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
     payload: { mode: "byok" },
   };
   const full = await app.inject(request);
@@ -955,4 +1208,258 @@ test("paid founders retain cohort places after deletion; abandoned unpaid accoun
     founderOrder,
   ]);
   assert.equal((await app.inject(request)).statusCode, 200);
+});
+
+test("a crashed request blocks dispatch before maintenance and keeps its reserve", async () => {
+  await transaction(db, (tx) => credit(tx, account, "topup", 10000n));
+  const id = await reserve(db, account, tenant, model, 1000);
+  await db.query(
+    "UPDATE requests SET created_at=now()-interval '6 minutes' WHERE id=$1",
+    [id],
+  );
+  await assert.rejects(
+    reserve(db, account, tenant, model, 1000),
+    /USAGE_RECONCILIATION_REQUIRED/,
+  );
+  await Promise.all([quarantineStaleUsage(db), quarantineStaleUsage(db)]);
+  assert.equal(
+    (await db.query("SELECT reserved FROM wallets")).rows[0].reserved,
+    "2500",
+  );
+  assert.equal((await db.query("SELECT * FROM incidents")).rowCount, 1);
+  // A late usage response can still settle exactly once after quarantine.
+  await Promise.all([
+    settle(db, id, model, { prompt_tokens: 100, completion_tokens: 100 }),
+    quarantineStaleUsage(db),
+  ]);
+  assert.equal(
+    (await db.query("SELECT balance,reserved FROM wallets")).rows[0].balance,
+    "9750",
+  );
+  await reserve(db, account, tenant, model, 1000);
+});
+
+test("confirmed unbilled usage releases a hold without charging", async () => {
+  await transaction(db, (tx) => credit(tx, account, "topup", 10000n));
+  const id = await reserve(db, account, tenant, model, 1000);
+  await settle(db, id, model, null);
+  await settle(
+    db,
+    id,
+    model,
+    { prompt_tokens: 0, completion_tokens: 0 },
+    "provider-confirmed-unbilled",
+  );
+  assert.deepEqual(
+    (await db.query("SELECT balance,reserved FROM wallets")).rows[0],
+    { balance: "10000", reserved: "0" },
+  );
+  assert.equal(
+    (await db.query("SELECT * FROM incidents WHERE resolved_at IS NULL"))
+      .rowCount,
+    0,
+  );
+});
+
+test("unresolved usage rejects HTTP inference before another provider call", async (t) => {
+  await transaction(db, (tx) => credit(tx, account, "topup", 10000n));
+  const id = await reserve(db, account, tenant, model, 1000);
+  await settle(db, id, model, null);
+  const key = token();
+  await db.query("UPDATE tenants SET inference_key_hash=$2 WHERE id=$1", [
+    tenant,
+    hash(key),
+  ]);
+  process.env.TEST_INFERENCE_KEY = "test-only";
+  t.after(() => {
+    delete process.env.TEST_INFERENCE_KEY;
+  });
+  t.mock.method(globalThis, "fetch", async () => {
+    throw Error("unexpected upstream call");
+  });
+  const app = await buildApp(c, db, [model]);
+  t.after(() => app.close());
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/chat/completions",
+    headers: { authorization: `Bearer ${key}` },
+    payload: { model: model.id, messages: [{ role: "user", content: "test" }] },
+  });
+  assert.equal(response.statusCode, 402);
+  assert.equal(response.json().error, "USAGE_RECONCILIATION_REQUIRED");
+});
+
+test("suspension parks compute despite unreachable tenant and backup, and retries safely", async (t) => {
+  const { Worker } = await import("../src/worker.js");
+  await db.query(
+    "UPDATE tenants SET paid_until=now()-interval '1 day',provider_id='vm1' WHERE id=$1",
+    [tenant],
+  );
+  const worker = new Worker(db, c, [model]);
+  let plan = "STARTER-2xCPU-4GB",
+    attempts = 0;
+  worker.provisioner.cloud.details = async () => ({
+    hostname: `${tenant}.agents.test`,
+    plan,
+  });
+  worker.backups.take = async () => {
+    throw Error("BACKUP_UNAVAILABLE");
+  };
+  t.mock.method(globalThis, "fetch", async () => {
+    throw Error("TENANT_UNREACHABLE");
+  });
+  worker.provisioner.cloud.park = async () => {
+    attempts++;
+    // Simulate provider accepting the plan change then losing the response.
+    plan = "CLOUDNATIVE-1xCPU-4GB";
+    if (attempts === 1) throw Error("NETWORK_FAILURE");
+  };
+  await assert.rejects(
+    worker.handle("suspend", { tenantId: tenant }),
+    /NETWORK_FAILURE/,
+  );
+  const first = (await db.query("SELECT * FROM tenants")).rows[0];
+  assert.equal(first.state, "suspended");
+  assert.equal(first.resume_plan, "STARTER-2xCPU-4GB");
+  await worker.handle("suspend", { tenantId: tenant });
+  const second = (await db.query("SELECT * FROM tenants")).rows[0];
+  assert.equal(second.resume_plan, first.resume_plan);
+  assert.equal(+second.delete_after, +first.delete_after);
+  assert.equal(attempts, 2);
+  // A previously queued backup cannot wake or call a parked tenant.
+  await worker.handle("backup", { tenantId: tenant });
+});
+
+test("paid recovery restores saved plan before starting and survives an HTTP retry", async (t) => {
+  const { Worker } = await import("../src/worker.js");
+  await db.query(
+    "UPDATE tenants SET state='suspended',provider_id='vm1',resume_plan='STARTER-2xCPU-4GB',suspended_at=now(),delete_after=now()+interval '30 days' WHERE id=$1",
+    [tenant],
+  );
+  const worker = new Worker(db, c, [model]);
+  let plan = "CLOUDNATIVE-1xCPU-4GB",
+    state = "stopped",
+    http = 0;
+  const actions: string[] = [];
+  worker.provisioner.cloud.details = async () => ({
+    hostname: `${tenant}.agents.test`,
+    plan,
+    state,
+  });
+  worker.provisioner.cloud.stop = async () => {
+    state = "stopped";
+  };
+  worker.provisioner.cloud.changeStoppedPlan = async (_id, next) => {
+    assert.equal(state, "stopped");
+    plan = next;
+    actions.push("restore-plan");
+  };
+  worker.provisioner.cloud.start = async () => {
+    assert.equal(plan, "STARTER-2xCPU-4GB");
+    state = "started";
+    actions.push("start");
+  };
+  t.mock.method(globalThis, "fetch", async () => {
+    actions.push("resume-agent");
+    if (++http === 1) throw Error("BOOTING");
+    return Response.json({ ok: true });
+  });
+  await assert.rejects(
+    worker.handle("resume", { tenantId: tenant }),
+    /BOOTING/,
+  );
+  assert.equal(
+    (await db.query("SELECT state FROM tenants")).rows[0].state,
+    "suspended",
+  );
+  await worker.handle("resume", { tenantId: tenant });
+  assert.deepEqual(actions, [
+    "restore-plan",
+    "start",
+    "resume-agent",
+    "start",
+    "resume-agent",
+  ]);
+  const row = (await db.query("SELECT * FROM tenants")).rows[0];
+  assert.equal(row.state, "awaiting_setup");
+  assert.equal(row.resume_plan, null);
+  assert.equal(row.delete_after, null);
+});
+
+test("expired entitlement cannot restart retained compute", async () => {
+  const { Worker } = await import("../src/worker.js");
+  await db.query(
+    "UPDATE tenants SET state='suspended',paid_until=now()-interval '1 day',provider_id='vm1',resume_plan='STARTER-2xCPU-4GB' WHERE id=$1",
+    [tenant],
+  );
+  const worker = new Worker(db, c, [model]);
+  worker.provisioner.cloud.details = async () => {
+    throw Error("must not touch cloud");
+  };
+  await worker.handle("resume", { tenantId: tenant });
+  assert.equal(
+    (await db.query("SELECT state FROM tenants")).rows[0].state,
+    "suspended",
+  );
+});
+
+test("lifecycle operations serialize against a competing tenant operation", async () => {
+  const { Worker } = await import("../src/worker.js");
+  const conn = await db.connect();
+  try {
+    await conn.query("SELECT pg_advisory_lock(hashtext($1))", [tenant]);
+    const worker = new Worker(db, c, [model]);
+    await assert.rejects(
+      worker.handle("suspend", { tenantId: tenant }),
+      /TENANT_BUSY/,
+    );
+  } finally {
+    await conn.query("SELECT pg_advisory_unlock(hashtext($1))", [tenant]);
+    conn.release();
+  }
+});
+
+test("billing portal rejects old sessions before contacting Stripe", async () => {
+  const session = token();
+  await db.query(
+    "INSERT INTO sessions(hash,account_id,created_at,expires_at) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour')",
+    [hash(session), account],
+  );
+  let calls = 0;
+  const billing = new Billing(db, c, {
+    billingPortal: {
+      sessions: {
+        create: async () => {
+          calls++;
+          return { url: "https://billing.stripe.com/test" };
+        },
+      },
+    },
+  } as any);
+  const app = await buildApp(c, db, [model], billing);
+  try {
+    const request = {
+      method: "POST" as const,
+      url: "/api/billing/portal",
+      headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
+      payload: {},
+    };
+    const stale = await app.inject(request);
+    assert.equal(stale.statusCode, 403);
+    assert.equal(stale.json().error, "FRESH_LOGIN_REQUIRED");
+    assert.equal(calls, 0);
+    await db.query("UPDATE sessions SET created_at=now() WHERE hash=$1", [
+      hash(session),
+    ]);
+    assert.equal((await app.inject(request)).statusCode, 200);
+    assert.equal(calls, 1);
+    const legacy = await app.inject({
+      ...request,
+      headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+    });
+    assert.equal(legacy.statusCode, 401);
+    assert.equal(calls, 1);
+  } finally {
+    await app.close();
+  }
 });

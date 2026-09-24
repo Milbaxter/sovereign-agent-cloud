@@ -100,7 +100,9 @@ export function launchGate(c: Config, credits = false) {
   if (c.BILLING_MODE === "live") {
     const evidence = JSON.parse(readFileSync(c.RELEASE_EVIDENCE_FILE, "utf8"));
     for (const name of [
+      "productionSecurity",
       "paidProvisioning",
+      "storageEncryption",
       "byokOnboarding",
       "creditOnboarding",
       "channels",
