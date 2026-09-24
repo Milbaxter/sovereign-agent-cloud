@@ -77,7 +77,8 @@ export class UpCloud {
           // Required by UpCloud cloud-init templates. Tenant container egress to
           // the link-local metadata endpoint is blocked by the host firewall.
           metadata: "yes",
-          firewall: "off",
+          // Trial accounts require this firewall; host rules add isolation.
+          firewall: "on",
           login_user: {
             username: "root",
             create_password: "no",

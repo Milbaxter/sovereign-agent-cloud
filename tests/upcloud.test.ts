@@ -27,6 +27,7 @@ test("cloud-init creation enables metadata and passes the bootstrap script and S
     );
     const { server } = JSON.parse(String(init?.body));
     assert.equal(server.metadata, "yes");
+    assert.equal(server.firewall, "on");
     assert.equal(server.zone, "fi-hel1");
     assert.equal(server.user_data, "#!/bin/bash\ntouch /root/booted");
     assert.equal(server.login_user.create_password, "no");

@@ -48,7 +48,8 @@ try {
         authenticated: true,
         credits: account.account.credits,
         creditExpiry:
-          "Verify promotional credit expiry in the UpCloud control panel.",
+          account.account.credits_breakdown?.account_free_credits?.breakdown ??
+          "Not exposed for this account; verify in the control panel.",
         zone,
         plans: candidates.map((p: any) => ({
           ...p,
@@ -60,7 +61,15 @@ try {
           template_type: t.template_type,
           size: t.size,
         })),
-        pricing,
+        pricingCurrency: prices.prices.currency,
+        additionalResourcePrices: Object.fromEntries(
+          [
+            "ipv4_address",
+            "storage_standard",
+            "storage_maxiops",
+            "storage_backup",
+          ].map((key) => [key, pricing?.[key] ?? null]),
+        ),
       },
       null,
       2,
