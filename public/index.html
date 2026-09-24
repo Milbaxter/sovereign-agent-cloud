@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>Your Agent — Account</title
+  ><link rel="stylesheet" href="/style.css" />
+  <body>
+    <main>
+      <header><a href="/">Your Agent</a><span>On your terms.</span></header>
+      <h1>Your agent, your control.</h1>
+      <p>
+        Your agent and stored context live in Finland. You choose where
+        inference runs.
+      </p>
+      <p id="notice" role="status"></p>
+      <section id="login">
+        <h2>Sign in</h2>
+        <form id="login-form">
+          <label
+            >Email<input
+              name="email"
+              type="email"
+              autocomplete="email"
+              required /></label
+          ><button>Send a sign-in link</button>
+        </form>
+      </section>
+      <section id="account" hidden>
+        <p id="email"></p>
+        <button id="logout" class="secondary">Sign out</button>
+        <div id="agent"></div>
+        <section id="purchase">
+          <h2>Get your agent</h2>
+          <p>
+            €25/month for hosting. Inference is separate. Applicable taxes
+            appear at checkout.
+          </p>
+          <form id="purchase-form">
+            <label
+              >Model connection<select id="mode">
+                <option value="byok">Use my own model key</option>
+                <option value="credits">Buy AI credit</option>
+              </select></label
+            ><label id="model-label" hidden
+              >Inference provider and location<select id="model"></select
+            ></label>
+            <p id="rates"></p>
+            <p>
+              One subscription supports one owner or trusted group. Members
+              share the agent’s trust boundary.
+            </p>
+            <button id="checkout">Continue to secure checkout</button>
+          </form>
+        </section>
+        <section>
+          <h2>AI credit</h2>
+          <p id="balance"></p>
+          <button id="topup">Buy €10 credit</button>
+          <p>
+            25% markup on provider rates. Tax is separate. No automatic refill.
+            Your own keys are billed directly by your provider.
+          </p>
+          <button id="ledger" class="secondary">Show recent usage</button>
+          <pre id="usage"></pre>
+        </section>
+        <section>
+          <h2>Billing</h2>
+          <button id="billing" class="secondary">Open billing portal</button>
+        </section>
+      </section>
+      <footer>
+        Hosting operators retain administrative infrastructure access. Exports
+        include credentials: store them securely. iMessage requires your
+        connected Mac.
+      </footer>
+    </main>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

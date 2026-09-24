@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sovereign
+      POSTGRES_USER: sovereign
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a database password}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U sovereign -d sovereign']
+      interval: 5s
+      retries: 10
+    logging: &logging
+      driver: local
+      options: {max-size: 10m, max-file: '3'}
+  migrate:
+    build: .
+    env_file: .env
+    command: [node, dist/migrate.js]
+    depends_on:
+      postgres: {condition: service_healthy}
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    command: [node, dist/main.js]
+    volumes: &config
+      - ./secrets:/app/secrets:ro
+      - ./models.json:/app/models.json:ro
+      - ./release-evidence.json:/app/release-evidence.json:ro
+    ports: ['127.0.0.1:3000:3000']
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    logging: *logging
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    command: [node, dist/worker-main.js]
+    volumes: *config
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    logging: *logging
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      PORTAL_DOMAIN: ${PORTAL_DOMAIN:?Set the portal hostname}
+    ports: ['80:80', '443:443']
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - certificates:/data
+    depends_on: [api]
+    logging: *logging
+volumes:
+  database:
+  certificates:

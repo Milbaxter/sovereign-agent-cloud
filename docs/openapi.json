@@ -1,0 +1,810 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Sovereign Agent Cloud",
+    "version": "0.1.0",
+    "description": "All browser POST requests require an Origin matching PUBLIC_ORIGIN. Wallet values are integer micro-euro strings. Session cookie is HttpOnly/Secure/SameSite=Strict. Upstream provider keys never enter this API."
+  },
+  "servers": [
+    {
+      "url": "https://account.example.com"
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "summary": "Health check",
+        "operationId": "get_healthz",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        }
+      }
+    },
+    "/api/catalog": {
+      "get": {
+        "summary": "Published hosting/inference choices and rates",
+        "operationId": "get_api_catalog",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        }
+      }
+    },
+    "/api/auth/request": {
+      "post": {
+        "summary": "Send verified-email sign-in link",
+        "operationId": "post_api_auth_request",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/consume": {
+      "post": {
+        "summary": "Consume a single-use sign-in token",
+        "operationId": "post_api_auth_consume",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "summary": "End the account session",
+        "operationId": "post_api_auth_logout",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me": {
+      "get": {
+        "summary": "Account-scoped agent status and micro-euro wallet balance",
+        "operationId": "get_api_me",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/checkout": {
+      "post": {
+        "summary": "Create or resume account-bound hosting Checkout",
+        "operationId": "post_api_checkout",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": ["byok", "credits"]
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "description": "Required for credits; exact verified model choice includes provider/country consent."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/credits/checkout": {
+      "post": {
+        "summary": "Create a EUR 10 credit Checkout",
+        "operationId": "post_api_credits_checkout",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/credits/ledger": {
+      "get": {
+        "summary": "Last 100 ledger entries in integer micro-euros",
+        "operationId": "get_api_credits_ledger",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/billing/portal": {
+      "post": {
+        "summary": "Create a Stripe customer-portal session",
+        "operationId": "post_api_billing_portal",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tenants/{id}/access": {
+      "post": {
+        "summary": "Create single-use 60-second tenant access handoff",
+        "operationId": "post_api_tenants_id_access",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tenants/{id}/export": {
+      "post": {
+        "summary": "Fresh-login encrypted export handoff",
+        "operationId": "post_api_tenants_id_export",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "recipient": {
+                    "type": "string",
+                    "pattern": "^age1[0-9a-z]{58}$"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tenants/{id}/ssh-key": {
+      "post": {
+        "summary": "Fresh-login tenant SSH public key addition",
+        "operationId": "post_api_tenants_id_ssh-key",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "publicKey": {
+                    "type": "string",
+                    "description": "Ed25519 OpenSSH public key; administrative network restrictions remain."
+                  },
+                  "sourceIp": {
+                    "type": "string",
+                    "format": "ipv4",
+                    "description": "Explicit source address for an owner SSH /32 allow rule."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tenants/{id}/cancel": {
+      "post": {
+        "summary": "Fresh-login cancellation at paid period end",
+        "operationId": "post_api_tenants_id_cancel",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "summary": "Selected verified managed model",
+        "operationId": "get_v1_models",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "tenantKey": []
+          }
+        ]
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "summary": "Metered streaming or non-streaming chat with tool calls",
+        "operationId": "post_v1_chat_completions",
+        "responses": {
+          "200": {
+            "description": "OpenAI-compatible JSON or SSE stream; tool calls supported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          },
+          "402": {
+            "description": "Insufficient unreserved credit or outstanding debt"
+          }
+        },
+        "security": [
+          {
+            "tenantKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "stream": {
+                    "type": "boolean"
+                  },
+                  "max_tokens": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/stripe": {
+      "post": {
+        "summary": "Raw-body signature-verified Stripe events",
+        "operationId": "post_webhooks_stripe",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response; URL responses contain a url field."
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Origin, ownership, or fresh login check failed"
+          },
+          "409": {
+            "description": "Lifecycle conflict"
+          },
+          "503": {
+            "description": "Launch gate closed or dependency unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "object"
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Stripe-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "session"
+      },
+      "tenantKey": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

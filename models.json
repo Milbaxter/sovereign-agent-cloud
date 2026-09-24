@@ -1,0 +1,18 @@
+[
+  {
+    "id": "scaleway-deepseek-flash",
+    "label": "DeepSeek V4 Flash",
+    "provider": "Scaleway",
+    "country": "France (Paris)",
+    "baseUrl": "https://api.scaleway.ai/v1",
+    "keyEnv": "SCALEWAY_API_KEY",
+    "upstreamModel": "deepseek-v4-flash-0731",
+    "rateVersion": "scaleway-2026-09-24-v1",
+    "inputMicroEurPerMillion": "400000",
+    "cachedMicroEurPerMillion": "80000",
+    "outputMicroEurPerMillion": "800000",
+    "maxContext": 262144,
+    "maxOutput": 32768,
+    "verified": false
+  }
+]

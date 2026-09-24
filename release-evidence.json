@@ -1,0 +1,11 @@
+{
+  "paidProvisioning": {"passed": false, "evidence": ""},
+  "byokOnboarding": {"passed": false, "evidence": ""},
+  "creditOnboarding": {"passed": false, "evidence": ""},
+  "channels": {"passed": false, "evidence": ""},
+  "isolation": {"passed": false, "evidence": ""},
+  "ledger": {"passed": false, "evidence": ""},
+  "migration": {"passed": false, "evidence": ""},
+  "backupLifecycle": {"passed": false, "evidence": ""},
+  "pilot": {"passed": false, "evidence": ""}
+}
