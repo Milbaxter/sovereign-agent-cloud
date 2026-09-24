@@ -18,6 +18,7 @@ import { hash, seal, unseal, token, handoff } from "./crypto.js";
 import { Billing } from "./billing.js";
 import { inference } from "./inference.js";
 import { tenantCall } from "./provision.js";
+import { contentRoutes } from "./content/routes.js";
 export async function buildApp(
   c: Config,
   db: DB,
@@ -44,6 +45,7 @@ export async function buildApp(
   app.addHook("onRequest", async (req, reply) => {
     reply
       .header("cache-control", "no-store")
+      .header("x-robots-tag", "noindex,nofollow")
       .header("referrer-policy", "no-referrer")
       .header("x-content-type-options", "nosniff");
     reply.header(
@@ -434,6 +436,7 @@ export async function buildApp(
     await audit(db, t.account_id, t.id, "cancel_at_period_end");
     return { ok: true };
   });
+  contentRoutes(app, c);
   await app.register(staticFiles, { root: resolve("public") });
   return app;
 }

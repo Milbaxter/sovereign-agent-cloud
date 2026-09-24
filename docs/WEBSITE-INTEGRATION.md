@@ -1,5 +1,7 @@
 # Website handoff
 
+The marketing surface now also includes a journal at `/welcome/blog/` and comparisons at `/welcome/compare/`, rendered by the backend without browser JavaScript. See [search content and launch setup](marketing/search-content.md) for the six articles, source checks, sitemap and indexing setting. `SEARCH_INDEXING_ENABLED` defaults to false; enable it on the final public domain to allow indexing of marketing pages. Account and API routes remain marked noindex.
+
 The marketing site is included in `public/welcome/` and served at `/welcome/`. The account portal stays at `/` so existing email sign-in fragments, Stripe return URLs, and API routes keep working. The existing Dockerfile includes both surfaces. Launch copy and recording/outreach materials are in [marketing](marketing/README.md). No Stripe products or live checkout settings are changed by the site integration.
 
 The marketing purchase button points to the same-origin account portal, with the inference selection mapped to `/?mode=byok` or `/?mode=credits`. The portal verifies the customer's email, records inference/provider consent, and calls `POST /api/checkout`. That endpoint returns a Stripe Checkout Session URL containing a server-bound order. Deployment still needs the €25 monthly recurring price and €10 one-time credit price IDs, both EUR and tax-exclusive, plus verified Stripe tax configuration. Do not use an unbound Payment Link: the earlier launch-kit suggestion predates the authenticated order contract.

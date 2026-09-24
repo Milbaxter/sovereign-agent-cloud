@@ -11,6 +11,7 @@ const schema = z.object({
   PORT: z.coerce.number().default(3000),
   DATABASE_URL: z.string(),
   PUBLIC_ORIGIN: z.string().url(),
+  SEARCH_INDEXING_ENABLED: bool,
   TENANT_DOMAIN: z.string().regex(/^[a-z0-9.-]+$/),
   BILLING_MODE: z.enum(["test", "live"]).default("test"),
   CHECKOUT_ENABLED: bool,

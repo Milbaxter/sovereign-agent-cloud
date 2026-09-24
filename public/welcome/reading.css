@@ -1,0 +1,245 @@
+.reading-main {
+  padding-bottom: 70px;
+}
+.breadcrumbs {
+  font-size: 13px;
+  color: var(--muted);
+  padding-top: 20px;
+}
+.breadcrumbs a,
+.article-body a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.reading-intro {
+  padding: 62px 0 48px;
+  max-width: 820px;
+}
+.reading-intro h1,
+.reading-article h1 {
+  font-weight: 500;
+  font-size: clamp(36px, 4.8vw, 66px);
+  letter-spacing: -2px;
+  line-height: 1.1;
+  margin: 0 0 25px;
+  text-wrap: balance;
+}
+.reading-intro > p:last-child {
+  font-size: 20px;
+  color: var(--muted);
+  max-width: 650px;
+}
+.reading-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+}
+.reading-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 30px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.reading-card .eyebrow {
+  margin-bottom: 16px;
+}
+.reading-card h2 {
+  font-size: 27px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.5px;
+  margin: 0 0 16px;
+}
+.reading-card h2 a:hover {
+  color: var(--blue);
+}
+.reading-card > p:not(.eyebrow) {
+  color: var(--muted);
+  margin: 0 0 26px;
+}
+.reading-card > .text-link {
+  margin-top: auto;
+  color: var(--blue);
+}
+.reading-article {
+  max-width: 790px;
+  margin: 64px auto 0;
+}
+.byline {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 25px 0;
+}
+.direct-answer {
+  font-size: 21px;
+  line-height: 1.6;
+  border-left: 3px solid var(--blue);
+  padding: 18px 24px;
+  background: var(--pale);
+  margin: 32px 0 46px;
+}
+.article-body {
+  font-size: 18px;
+  line-height: 1.8;
+}
+.article-body h2 {
+  font-size: 29px;
+  line-height: 1.25;
+  letter-spacing: -0.6px;
+  font-weight: 500;
+  margin: 42px 0 18px;
+}
+.article-body p {
+  margin: 0 0 22px;
+}
+.article-body li {
+  padding-left: 5px;
+  margin-bottom: 14px;
+}
+.article-body a {
+  color: var(--blue);
+}
+.table-scroll {
+  overflow-x: auto;
+  margin: 26px 0;
+  max-width: 100%;
+}
+.article-body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+  line-height: 1.6;
+  text-align: left;
+}
+.article-body th,
+.article-body td {
+  border-bottom: 1px solid var(--line);
+  padding: 16px;
+  vertical-align: top;
+  min-width: 150px;
+}
+.article-body thead {
+  background: var(--pale);
+}
+.article-body caption {
+  text-align: left;
+  font-size: 14px;
+  color: var(--muted);
+  padding-bottom: 12px;
+}
+.article-body .editorial-note {
+  font-size: 14px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+.reading-cta {
+  margin: 65px 0 48px;
+  padding: 40px;
+  background: var(--pale);
+  border-radius: 14px;
+}
+.reading-cta h2 {
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: -0.6px;
+  margin: 0 0 16px;
+}
+.reading-cta p:not(.eyebrow) {
+  color: var(--muted);
+  max-width: 640px;
+}
+.related-reading > h2 {
+  font-size: 28px;
+  font-weight: 500;
+  margin-bottom: 24px;
+}
+.journal-teaser {
+  border-top: 1px solid var(--line);
+}
+.journal-teaser .reading-card h3 {
+  font-size: 25px;
+  line-height: 1.25;
+  font-weight: 500;
+  margin: 0 0 18px;
+}
+.journal-teaser .reading-card h3 a:hover {
+  color: var(--blue);
+}
+.journal-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin-top: 28px;
+}
+.reading-page .site-footer {
+  flex-wrap: wrap;
+}
+.article-body,
+.reading-card,
+.breadcrumbs {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .reading-grid {
+    grid-template-columns: 1fr;
+  }
+  .reading-intro {
+    padding: 40px 0 24px;
+  }
+  .reading-article {
+    margin-top: 36px;
+  }
+  .reading-intro h1,
+  .reading-article h1 {
+    letter-spacing: -1.2px;
+  }
+  .reading-card {
+    padding: 24px;
+  }
+  .reading-card h2 {
+    font-size: 25px;
+  }
+  .reading-cta {
+    padding: 26px;
+    margin-top: 42px;
+  }
+  .direct-answer {
+    font-size: 18px;
+    padding: 16px 20px;
+  }
+  .article-body {
+    font-size: 17px;
+  }
+  .article-body h2 {
+    font-size: 26px;
+  }
+  .reading-page .site-header {
+    flex-wrap: wrap;
+    padding-block: 18px;
+  }
+  .reading-page .site-header nav {
+    display: flex;
+    order: 3;
+    width: 100%;
+    gap: 24px;
+    font-size: 13px;
+  }
+  .reading-page .site-header > .button {
+    max-width: 150px;
+  }
+  .breadcrumbs {
+    font-size: 12px;
+  }
+  .article-body th,
+  .article-body td {
+    min-width: 130px;
+    padding: 12px;
+  }
+  .reading-main {
+    padding-bottom: 40px;
+  }
+}
