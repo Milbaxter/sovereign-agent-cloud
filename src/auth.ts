@@ -5,13 +5,14 @@ import { z } from "zod";
 import { hash, token } from "./crypto.js";
 import { transaction, type DB } from "./db.js";
 import type { Config } from "./config.js";
+export const PORTAL_COOKIE = "__Host-session";
 export type Identity = { accountId: string; createdAt: Date };
 export async function identity(
   req: FastifyRequest,
   db: DB,
   fresh = false,
 ): Promise<Identity> {
-  const sid = req.cookies.session;
+  const sid = req.cookies[PORTAL_COOKIE];
   const row =
     sid &&
     (
@@ -86,9 +87,9 @@ export function auth(app: FastifyInstance, db: DB, c: Config) {
         [hash(session), row.account_id],
       );
     });
-    reply.setCookie("session", session, {
+    reply.setCookie(PORTAL_COOKIE, session, {
       httpOnly: true,
-      secure: c.PUBLIC_ORIGIN.startsWith("https:"),
+      secure: true,
       sameSite: "strict",
       path: "/",
       maxAge: 7 * 86400,
@@ -96,11 +97,16 @@ export function auth(app: FastifyInstance, db: DB, c: Config) {
     return { ok: true };
   });
   app.post("/api/auth/logout", async (req, reply) => {
-    if (req.cookies.session)
+    if (req.cookies[PORTAL_COOKIE])
       await db.query("DELETE FROM sessions WHERE hash=$1", [
-        hash(req.cookies.session),
+        hash(req.cookies[PORTAL_COOKIE]),
       ]);
-    reply.clearCookie("session", { path: "/" });
+    reply.clearCookie(PORTAL_COOKIE, {
+      path: "/",
+      secure: true,
+      httpOnly: true,
+      sameSite: "strict",
+    });
     return { ok: true };
   });
 }

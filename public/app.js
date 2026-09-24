@@ -17,7 +17,7 @@ const run = (fn) => async (e) => {
   } catch (err) {
     notice(
       err.message === "FRESH_LOGIN_REQUIRED"
-        ? "Request a new sign-in link before exporting, changing SSH access, or cancelling."
+        ? "Request a new sign-in link before exporting, changing SSH access, opening billing, or cancelling."
         : err.message,
     );
   }

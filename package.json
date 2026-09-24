@@ -16,6 +16,7 @@
     "test": "tsx --test --test-concurrency=1 tests/*.test.ts",
     "migrate": "tsx src/migrate.ts",
     "preflight": "tsx scripts/preflight.ts",
+    "upcloud:inspect": "node --env-file-if-exists=.env --import tsx scripts/upcloud-inspect.ts",
     "format": "prettier --write src tests scripts public tenant-public docs/openapi.json",
     "format:check": "prettier --check src tests scripts public tenant-public docs/openapi.json"
   },

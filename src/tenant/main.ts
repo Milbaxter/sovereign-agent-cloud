@@ -16,10 +16,11 @@ import { resolve } from "node:path";
 import { isIP } from "node:net";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { consumeTicket } from "./tickets.js";
 import { gatewayProxy } from "./gateway-proxy.js";
 import { tenantSession } from "./session.js";
+import { tenantSecurity, TENANT_COOKIE } from "./security.js";
 import { z } from "zod";
 import { token, hash } from "../crypto.js";
 const exec = promisify(execFile),
@@ -45,29 +46,9 @@ app.setErrorHandler((e: any, _req, reply) =>
     .send({ error: e.statusCode ? e.message : "OPERATION_FAILED" }),
 );
 function auth(req: any) {
-  return tenantSession(db, req.cookies.agent_session) as any;
+  return tenantSession(db, req.cookies[TENANT_COOKIE]) as any;
 }
-function management(req: any) {
-  const supplied = Buffer.from(req.headers.authorization ?? ""),
-    expected = Buffer.from(`Bearer ${b.managementKey}`);
-  if (
-    supplied.length !== expected.length ||
-    !timingSafeEqual(supplied, expected)
-  )
-    throw Object.assign(Error("UNAUTHORIZED"), { statusCode: 401 });
-}
-app.addHook("onRequest", async (req, reply) => {
-  reply
-    .header("cache-control", "no-store")
-    .header("referrer-policy", "no-referrer");
-  if (
-    req.method === "POST" &&
-    !req.url.startsWith("/internal/") &&
-    req.headers.origin !== origin
-  )
-    throw Object.assign(Error("ORIGIN_REJECTED"), { statusCode: 403 });
-  if (req.url.startsWith("/internal/")) management(req);
-});
+tenantSecurity(app, origin, b.managementKey);
 const claw = async (args: string[]) =>
   exec("docker", ["exec", "openclaw", "node", "dist/index.js", ...args], {
     timeout: 60000,
@@ -94,7 +75,7 @@ app.post("/handoff", async (req, reply) => {
     b.tenantId,
     origin,
   );
-  reply.setCookie("agent_session", sid, {
+  reply.setCookie(TENANT_COOKIE, sid, {
     httpOnly: true,
     secure: true,
     sameSite: "strict",
@@ -241,7 +222,7 @@ app.get("/api/local/devices", async (req) => {
   const data = JSON.parse(stdout);
   const device = db
     .prepare("SELECT public_key FROM session_devices WHERE session_hash=?")
-    .get(hash(req.cookies.agent_session!));
+    .get(hash(req.cookies[TENANT_COOKIE]!));
   return {
     pending: (data.pending ?? []).filter(
       (p: any) =>
@@ -262,7 +243,7 @@ app.post("/api/local/pair", async (req) => {
   const data = JSON.parse((await claw(["devices", "list", "--json"])).stdout);
   const device = db
     .prepare("SELECT public_key FROM session_devices WHERE session_hash=?")
-    .get(hash(req.cookies.agent_session!));
+    .get(hash(req.cookies[TENANT_COOKIE]!));
   const pending = (data.pending ?? []).find(
     (p: any) =>
       p.requestId === requestId &&
@@ -305,7 +286,7 @@ app.post("/api/local/export", async (req) => {
   const out = await archive(s.recipient);
   db.prepare("INSERT INTO exports VALUES(?,?,?,?)").run(
     out.id,
-    hash(req.cookies.agent_session!),
+    hash(req.cookies[TENANT_COOKIE]!),
     out.file,
     Date.now() + 600000,
   );
@@ -319,7 +300,7 @@ app.get("/exports/:id", async (req, reply) => {
     .parse((req.params as any).id);
   const row = db
     .prepare("SELECT * FROM exports WHERE id=? AND session_hash=? AND expiry>?")
-    .get(id, hash(req.cookies.agent_session!), Date.now()) as any;
+    .get(id, hash(req.cookies[TENANT_COOKIE]!), Date.now()) as any;
   if (!row) throw Object.assign(Error("EXPORT_EXPIRED"), { statusCode: 404 });
   reply
     .header("content-type", "application/octet-stream")

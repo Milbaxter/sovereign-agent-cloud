@@ -119,12 +119,12 @@ await write(
 );
 await write(
   "/etc/systemd/system/sac-terminal.service",
-  `[Unit]\nDescription=Owner-authenticated OpenClaw onboarding terminal\nAfter=docker.service\n[Service]\nExecStart=/usr/bin/ttyd -W -i 127.0.0.1 -p 7681 -b /terminal /usr/local/bin/sac-onboard\nRestart=on-failure\n[Install]\nWantedBy=multi-user.target\n`,
+  `[Unit]\nDescription=Owner-authenticated OpenClaw onboarding terminal\nAfter=docker.service\n[Service]\nExecStart=/usr/bin/ttyd -W -O -i 127.0.0.1 -p 7681 -b /terminal /usr/local/bin/sac-onboard\nRestart=on-failure\n[Install]\nWantedBy=multi-user.target\n`,
   0o644,
 );
 await write(
   "/etc/caddy/Caddyfile",
-  `${b.hostname} {\n  header {\n    Referrer-Policy no-referrer\n    X-Content-Type-Options nosniff\n  }\n  @access path /handoff* /sac-assets/* /internal/* /authorize /setup* /api/local/* /export*\n  handle @access { reverse_proxy 127.0.0.1:3080 }\n  handle {\n    forward_auth 127.0.0.1:3080 { uri /authorize }\n    handle /terminal* { reverse_proxy 127.0.0.1:7681 }\n    @gatewaySocket header Upgrade websocket\n    handle @gatewaySocket { reverse_proxy 127.0.0.1:3080 }\n    handle { reverse_proxy 127.0.0.1:18789 }\n  }\n}\n`,
+  `${b.hostname} {\n  header {\n    Referrer-Policy no-referrer\n    X-Content-Type-Options nosniff\n    Strict-Transport-Security "max-age=31536000"\n    X-Frame-Options DENY\n  }\n  @access path /handoff* /sac-assets/* /internal/* /authorize /setup* /api/local/* /export*\n  handle @access {\n    reverse_proxy 127.0.0.1:3080\n  }\n  handle {\n    forward_auth 127.0.0.1:3080 {\n      uri /authorize\n    }\n    handle /terminal* {\n      reverse_proxy 127.0.0.1:7681\n    }\n    @gatewaySocket header Upgrade websocket\n    handle @gatewaySocket {\n      reverse_proxy 127.0.0.1:3080\n    }\n    handle {\n      reverse_proxy 127.0.0.1:18789\n    }\n  }\n}\n`,
   0o644,
 );
 // Public-only networking plus host firewall: container egress cannot reach private peers/metadata.

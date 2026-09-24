@@ -45,10 +45,15 @@ assert.ok(started, 'access service starts');
 const db=new DatabaseSync('/var/lib/sac/access.sqlite');
 const hash=x=>createHash('sha256').update(x).digest('hex');
 for(const action of ['access','export']) db.prepare('INSERT INTO sessions VALUES(?,?,?,?,?)').run(hash(action),Date.now(),Date.now()+60000,action,'');
-const access={cookie:'agent_session=access'};
+const access={cookie:'__Host-agent_session=access'};
 // Caddy invokes this for every asset: more than 60 checks must not throttle the page.
 for(let i=0;i<75;i++) assert.equal((await fetch(base+'/authorize',{headers:access})).status,204);
 assert.equal((await fetch(base+'/internal/suspend',{method:'POST'})).status,401);
+// Encoded static segments must not bypass the management hook.
+for (const path of ['/%69nternal/suspend','/in%74ernal/ssh-key']) {
+ assert.equal((await fetch(base+path,{method:'POST',headers:{origin:'https://tenant.test','content-type':'application/json'},body:'{}'})).status,401);
+}
+assert.equal((await fetch(base+'/authorize',{headers:{cookie:'agent_session=access'}})).status,401);
 const management={authorization:'Bearer fixture-management'};
 const backup=fetch(base+'/internal/backup',{method:'POST',headers:management});
 let exporting=false;
@@ -66,7 +71,7 @@ assert.equal(readFileSync('/tmp/gateway-running','utf8').trim(),'false');
 assert.deepEqual(readFileSync('/tmp/docker-events','utf8').trim().split('\n'),['stop','start','stop']);
 assert.equal((await fetch(base+'/api/local/info',{headers:access})).status,403);
 assert.equal((await fetch(base+'/authorize',{headers:access})).status,403);
-assert.equal((await fetch(base+'/api/local/info',{headers:{cookie:'agent_session=export'}})).status,200);
+assert.equal((await fetch(base+'/api/local/info',{headers:{cookie:'__Host-agent_session=export'}})).status,200);
 assert.equal((await fetch(base+'/internal/resume',{method:'POST',headers:management})).status,200);
 assert.equal((await fetch(base+'/authorize',{headers:access})).status,204);
 db.close();

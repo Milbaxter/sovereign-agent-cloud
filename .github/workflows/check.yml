@@ -28,4 +28,5 @@ jobs:
       - run: for script in deploy/*.sh scripts/*.sh; do bash -n "$script"; done
       - run: npm audit --omit=dev
       - run: docker build -t sac-runtime:ci .
+      - run: scripts/tenant-bootstrap-smoke.sh sac-runtime:ci
       - run: scripts/tenant-lifecycle-smoke.sh sac-runtime:ci

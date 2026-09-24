@@ -17,6 +17,7 @@ import { hash, token, seal, unseal, handoff } from "../src/crypto.js";
 import { Billing } from "../src/billing.js";
 import { buildApp } from "../src/app.js";
 import { Provisioner } from "../src/provision.js";
+import { UpCloud } from "../src/providers/upcloud.js";
 import { consumeTicket } from "../src/tenant/tickets.js";
 import { UsageStream } from "../src/inference.js";
 import { launchGate, type Config, type Model } from "../src/config.js";
@@ -47,6 +48,7 @@ const c = {
   TENANT_IMAGE:
     "ghcr.io/milbaxter/sovereign-agent-cloud:test@sha256:" + "b".repeat(64),
   UPCLOUD_PLAN: "test",
+  UPCLOUD_TOKEN: "test-token",
   UPCLOUD_TEMPLATE: "test",
   ADMIN_CIDR: "203.0.113.1/32",
   ADMIN_SSH_PUBLIC_KEY: "ssh-ed25519 TEST",
@@ -364,14 +366,17 @@ test("cross-account access and CSRF are rejected", async () => {
     let r = await app.inject({
       method: "POST",
       url: `/api/tenants/${tenant}/access`,
-      headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+      headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
       payload: {},
     });
     assert.equal(r.statusCode, 404);
     r = await app.inject({
       method: "POST",
       url: "/api/auth/logout",
-      headers: { origin: "https://evil.test", cookie: `session=${session}` },
+      headers: {
+        origin: "https://evil.test",
+        cookie: `__Host-session=${session}`,
+      },
       payload: {},
     });
     assert.equal(r.statusCode, 403);
@@ -390,7 +395,7 @@ test("fresh authentication required for credential-bearing export", async () => 
     const r = await app.inject({
       method: "POST",
       url: `/api/tenants/${tenant}/export`,
-      headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+      headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
       payload: { recipient: "age1" + "a".repeat(58) },
     });
     assert.equal(r.statusCode, 403);
@@ -436,6 +441,143 @@ test("uncertain provider create is never blindly retried", async () => {
   await assert.rejects(provisioner.provision(tenant), /RECONCILIATION/);
   assert.equal(creates, 1);
 });
+test("explicit UpCloud rejection clears credentials and allows a corrected retry", async () => {
+  await db.query("UPDATE tenants SET state='provisioning' WHERE id=$1", [
+    tenant,
+  ]);
+  let creates = 0;
+  const cloud = {
+    find: async () => null,
+    create: async () => {
+      creates++;
+      throw Object.assign(
+        Error("UPCLOUD_409_METADATA_DISABLED_ON_CLOUD_INIT"),
+        { status: 409 },
+      );
+    },
+  };
+  const provisioner = new Provisioner(db, c, [model], cloud as any, {} as any);
+  for (let i = 0; i < 2; i++) {
+    await assert.rejects(provisioner.provision(tenant), /UPCLOUD_409/);
+    const row = (await db.query("SELECT * FROM tenants WHERE id=$1", [tenant]))
+      .rows[0];
+    for (const field of [
+      "create_attempted_at",
+      "bootstrap_hash",
+      "bootstrap_expires_at",
+      "bundle_cipher",
+      "inference_key_hash",
+      "inference_key_cipher",
+    ])
+      assert.equal(row[field], null);
+  }
+  assert.equal(creates, 2);
+});
+
+test("provider, single-use bootstrap, DNS and health retry reach owner setup", async (ctx) => {
+  await db.query(
+    "UPDATE tenants SET state='provisioning',mode='byok' WHERE id=$1",
+    [tenant],
+  );
+  const hostname = (
+    await db.query("SELECT hostname FROM tenants WHERE id=$1", [tenant])
+  ).rows[0].hostname;
+  const app = await buildApp(c, db, []);
+  ctx.after(() => app.close());
+  let creates = 0;
+  const remote = {
+    uuid: "vm-e2e",
+    hostname,
+    ip_addresses: {
+      ip_address: [
+        { access: "public", family: "IPv4", address: "203.0.113.2" },
+      ],
+    },
+    storage_devices: {
+      storage_device: [
+        { storage: "disk-e2e", type: "disk", storage_encrypted: "yes" },
+      ],
+    },
+  };
+  const cloud = new UpCloud(
+    { ...c, UPCLOUD_TOKEN: "test-token" },
+    async (url, init) => {
+      if (init?.method === "POST") {
+        creates++;
+        const { server } = JSON.parse(String(init.body));
+        assert.equal(server.metadata, "yes");
+        assert.ok(server.user_data.startsWith("#!/bin/bash"));
+        assert.ok(!server.user_data.includes("# BOOTSTRAP_VARIABLES"));
+        const payload = {
+          token: server.user_data.match(/BOOTSTRAP_TOKEN='([^']+)'/)[1],
+        };
+        const response = await app.inject({
+          method: "POST",
+          url: `/bootstrap/${tenant}`,
+          payload,
+        });
+        assert.equal(response.statusCode, 200);
+        assert.equal(response.json().managementKey, "secret");
+        assert.equal(response.json().tenantId, tenant);
+        assert.equal(response.json().mode, "byok");
+        assert.equal(
+          (
+            await app.inject({
+              method: "POST",
+              url: `/bootstrap/${tenant}`,
+              payload,
+            })
+          ).statusCode,
+          403,
+        );
+        return new Response(JSON.stringify({ server: remote }), {
+          status: 202,
+        });
+      }
+      return new Response(
+        JSON.stringify(
+          String(url).includes("?")
+            ? { servers: { server: [] } }
+            : { server: remote },
+        ),
+      );
+    },
+  );
+  let healthReady = false;
+  ctx.mock.method(
+    globalThis,
+    "fetch",
+    async (url: string, init: RequestInit) => {
+      assert.equal(url, `https://${hostname}/internal/status`);
+      assert.equal(
+        new Headers(init.headers).get("authorization"),
+        "Bearer secret",
+      );
+      return new Response(JSON.stringify({ installed: healthReady }));
+    },
+  );
+  const dns = {
+    ensure: async (name: string, ip: string) => {
+      assert.equal(name, hostname);
+      assert.equal(ip, "203.0.113.2");
+      return "dns-e2e";
+    },
+  };
+  const provisioner = new Provisioner(db, c, [], cloud, dns as any);
+  await assert.rejects(provisioner.provision(tenant), /WAITING_FOR_BOOTSTRAP/);
+  healthReady = true;
+  await provisioner.provision(tenant);
+  const row = (await db.query("SELECT * FROM tenants WHERE id=$1", [tenant]))
+    .rows[0];
+  assert.equal(creates, 1);
+  assert.equal(row.state, "awaiting_setup");
+  assert.equal(row.provider_id, "vm-e2e");
+  assert.deepEqual(row.disk_ids, ["disk-e2e"]);
+  assert.equal(row.dns_id, "dns-e2e");
+  assert.equal(row.bootstrap_hash, null);
+  assert.equal(row.bundle_cipher, null);
+});
+
 test("provider retry finds VM after response loss without creating again", async () => {
   await db.query(
     "UPDATE tenants SET state='provisioning',create_attempted_at=now() WHERE id=$1",
@@ -573,7 +715,11 @@ test("email verification tokens are single-use and sessions contain only hashes"
     };
     const r = await app.inject(request);
     assert.equal(r.statusCode, 200);
+    assert.match(String(r.headers["set-cookie"]), /^__Host-session=/);
     assert.match(String(r.headers["set-cookie"]), /HttpOnly/);
+    assert.match(String(r.headers["set-cookie"]), /Secure/);
+    assert.match(String(r.headers["set-cookie"]), /Path=\//);
+    assert.doesNotMatch(String(r.headers["set-cookie"]), /Domain=/i);
     assert.equal((await app.inject(request)).statusCode, 401);
     assert.equal((await db.query("SELECT * FROM login_tokens")).rowCount, 0);
     assert.equal(
@@ -947,7 +1093,7 @@ test("expired entitlement denies new access before the lifecycle worker catches 
   const request = {
     method: "POST" as const,
     url: `/api/tenants/${tenant}/access`,
-    headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+    headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
     payload: {},
   };
   assert.equal((await app.inject(request)).statusCode, 409);
@@ -1052,7 +1198,7 @@ test("paid founders retain cohort places after deletion; abandoned unpaid accoun
   const request = {
     method: "POST" as const,
     url: "/api/checkout",
-    headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+    headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
     payload: { mode: "byok" },
   };
   const full = await app.inject(request);
@@ -1270,5 +1416,50 @@ test("lifecycle operations serialize against a competing tenant operation", asyn
   } finally {
     await conn.query("SELECT pg_advisory_unlock(hashtext($1))", [tenant]);
     conn.release();
+  }
+});
+
+test("billing portal rejects old sessions before contacting Stripe", async () => {
+  const session = token();
+  await db.query(
+    "INSERT INTO sessions(hash,account_id,created_at,expires_at) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour')",
+    [hash(session), account],
+  );
+  let calls = 0;
+  const billing = new Billing(db, c, {
+    billingPortal: {
+      sessions: {
+        create: async () => {
+          calls++;
+          return { url: "https://billing.stripe.com/test" };
+        },
+      },
+    },
+  } as any);
+  const app = await buildApp(c, db, [model], billing);
+  try {
+    const request = {
+      method: "POST" as const,
+      url: "/api/billing/portal",
+      headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
+      payload: {},
+    };
+    const stale = await app.inject(request);
+    assert.equal(stale.statusCode, 403);
+    assert.equal(stale.json().error, "FRESH_LOGIN_REQUIRED");
+    assert.equal(calls, 0);
+    await db.query("UPDATE sessions SET created_at=now() WHERE hash=$1", [
+      hash(session),
+    ]);
+    assert.equal((await app.inject(request)).statusCode, 200);
+    assert.equal(calls, 1);
+    const legacy = await app.inject({
+      ...request,
+      headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+    });
+    assert.equal(legacy.statusCode, 401);
+    assert.equal(calls, 1);
+  } finally {
+    await app.close();
   }
 });
