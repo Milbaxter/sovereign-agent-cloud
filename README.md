@@ -12,7 +12,7 @@ A small control service for paid, dedicated UpCloud VMs running **unmodified Ope
 - Encrypted complete state exports, seven daily Finnish backups, migration instructions, suspended-account export, retention/deletion jobs, and rollback tooling.
 - Public OpenAPI contract, Docker deployments, PostgreSQL integration tests, and CI/image publishing workflows.
 
-The marketing website and Stripe product configuration are maintained separately. Read [the website handoff](docs/WEBSITE-INTEGRATION.md) before connecting checkout. The previous static Payment Link suggestion is superseded by account-bound Checkout Sessions.
+The marketing website is included at **`/welcome/`**, with the existing account portal at **`/`**. Its purchase link passes the selected inference mode to the portal; verified email access and server-bound Checkout Sessions remain the only purchase path. Read [the website handoff](docs/WEBSITE-INTEGRATION.md) and [launch materials](docs/marketing/README.md). Stripe products still need configuration; the previous standalone Payment Link suggestion is superseded.
 
 ## Local development
 
