@@ -63,3 +63,11 @@ Daily tenant backups pause the Gateway briefly. Subscription cancellation ends a
 Run `scripts/tenant-update.sh PINNED_OFFICIAL_IMAGE` as root on a canary tenant. It pre-pulls the image, takes a quiesced local state snapshot, updates the pin, checks health, and restores the prior image and state on failure. Validate real provider and messaging behavior before applying the same pin to other tenants. Keep or securely remove the pre-upgrade snapshot after the rollback window; it contains credentials. Updating the deployment default affects new tenants only.
 
 Back up PostgreSQL daily using `scripts/control-backup.sh`, with the same Finland-only encrypted object-storage policy. Save signing/encryption keys separately. Test restoring database and keys together before live launch. PostgreSQL holds billing identifiers and ledger metadata, not agent conversations. Stripe remains an external payment processor and SMTP sees login email addresses; do not market billing/email metadata as exclusively local.
+
+## Security release review
+
+Read [the production security review](SECURITY-AUDIT-2026-09-24.md) before enabling live payments. Keep `productionSecurity` false until the reviewed image and final infrastructure pass the listed deployment checks. Repository tests alone do not establish that.
+
+Security updates change both account and tenant sessions to Secure `__Host-` cookies. Existing sessions require a fresh sign-in/handoff after rollout. Local browser development must use HTTPS or localhost. Opening the Stripe billing portal now requires authentication within the last ten minutes.
+
+New tenant bootstrap enables ttyd origin checking and tenant HSTS/framing headers. Updating only the runtime image does not change an existing VM's generated terminal unit or Caddyfile; update those files explicitly, validate Caddy and reload services, then verify that same-origin terminal access works and foreign-origin WebSockets are rejected. Do not rerun the whole bootstrap on an existing tenant: it initializes state/configuration.

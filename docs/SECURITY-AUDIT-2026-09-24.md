@@ -1,0 +1,49 @@
+# Production security review — 24 September 2026
+
+**Decision: not approved for production.** A permanent domain/name is deliberately outside this review. Checkout remains disabled and the new `productionSecurity` release-evidence entry is false. Passing automated tests does not clear the deployment requirements below.
+
+## Scope and evidence
+
+Reviewed the account portal/marketing site, authentication and tenant authorization, Stripe checkout/webhooks/subscription and credit ledger, inference proxy, VM/bootstrap/firewall configuration, exports/backups/deletion, dependency tree, Git history and repository controls. The review branch starts at `e43f854` from `codex/upcloud-e2e`; `main` was `8de0246`. Other open feature branches are not assumed to be deployed.
+
+Inspected the temporary UpCloud control VM over SSH without reading customer content or printing credentials. Observed production Node settings, **test** billing mode, disabled checkout/credits, and missing webhook, SMTP and backup configuration. A Stripe key variable was populated; validity and account configuration were not established. The separate infrastructure task was deleting its disposable VMs at the end of this review. These observations are a test-environment snapshot, not approval of a standing production deployment.
+
+## Code findings and remediation
+
+| Priority | Finding | Result in this branch |
+| --- | --- | --- |
+| Critical | Tenant management authentication classified the raw URL, while Fastify routed decoded path segments. Encoded static segments reached an internal handler without a management token. Management handlers include SSH-key installation and workload control. | Authorization now uses the matched route. Regression tests cover all six management routes, several encodings, absent/wrong credentials, and valid management access. Confirmed in the real Fastify router; a public reverse-proxy exploit was not exercised. |
+| High | Portal and tenant cookies had generic names. A sibling tenant origin could set parent-domain cookies with the same names, allowing session substitution/shadowing. SameSite does not isolate sibling sites. | Both use `__Host-` cookies with Secure, HttpOnly, Path=/ and no Domain. Old names are rejected, including WebSocket authorization. Existing users must sign in again after rollout. Development requires HTTPS or a browser's secure localhost exception. |
+| High | The onboarding terminal was launched without ttyd's WebSocket origin check. Cookie authentication alone is insufficient against a malicious same-site sibling origin. | ttyd now starts with `-O`; new tenant responses also prohibit framing and send HSTS. Verify same-origin terminal access and cross-origin rejection through the final proxy before release. |
+| Medium | The billing portal accepted a seven-day session despite the application's ten-minute fresh-login rule for cancellation. Stripe portal configuration can expose cancellation and payment changes. | Portal creation now requires fresh authentication. Tests prove rejection before Stripe is called, acceptance after reauthentication, and rejection of legacy cookies. |
+| Release control | Existing live launch gates did not explicitly require security sign-off. | `productionSecurity` must contain passing, nonempty deployment evidence; missing/failed evidence blocks live checkout. It remains false. |
+
+The encoded-path regression was first reproduced against the unpatched Fastify hook. The change fixes the server-side authorization decision rather than relying on an edge proxy to normalize or reject URLs.
+
+## Unresolved launch requirements
+
+1. **Deploy the reviewed security fixes and verify the resulting runtime.** Publish and pin a tested image digest. Existing tenant images and generated systemd/Caddy files are not updated by editing this repository. The bootstrap changes apply to new tenants; existing tenants need an explicit terminal/Caddy update. Verify unauthorized management access, account isolation, cookie attributes, sign-in, signed handoff, pairing, terminal origin checks, export and suspension against the final deployment. Do not expose the old tenant management service publicly.
+2. **Finish the real Stripe integration.** The inspected test control stack lacked a webhook signing secret. Verify test/live account separation, price IDs/currency/amounts, signed event delivery, actual test checkout, duplicate/reordered events, payment failure, cancellation and credit reversal. Raw card entry is delegated to Stripe Checkout; this review does not establish PCI compliance. Review Stripe portal features and account access/MFA. Hosting refunds/disputes currently receive no hosting-specific action: `Billing.reversal` selects only credit orders. Establish and test a hosting fraud/refund incident and entitlement policy before live payments.
+3. **Prove storage encryption, recovery and deletion.** The encrypted-storage change is still a separate unmerged branch/PR. The audited provisioning branch does not require or verify the proposed encrypted root-storage configuration. No backup bucket/endpoint was configured in the inspected control environment. Verify root disks/snapshots, private Finnish backup storage, encryption keys stored separately, daily control DB backup scheduling, failed-backup alerts, full restore onto an independent host, and retention deletion including any object versions. An encrypted tenant archive downloaded during the separate infrastructure test is useful evidence, but does not establish bucket retention or disaster recovery.
+4. **Install persistent control-host network controls.** The temporary control host had an IPv4 INPUT allowlist for SSH and web ports, but its bootstrap installed runtime iptables commands with no persistence. IPv6 INPUT had no restrictions; SSH listened on IPv6, although a publicly routed IPv6 address was not established. Install and reboot-test persistent IPv4/IPv6 rules, confirm cloud firewall policies, and scan externally. PostgreSQL was unpublished and the API was loopback-published. Password/keyboard-interactive SSH were disabled. Restrict privileged access to operator keys and verify the effective SSH configuration after reboot.
+5. **Set up monitoring and emergency controls.** Database incidents are not a delivered alerting service. Wire worker health, backup failures, resource/billing anomalies and security events to an operator. Verify credential revocation/rotation, recovery keys, incident response and upstream spending caps. Public API and worker containers currently share an environment containing infrastructure credentials; split runtime privileges/secrets where possible. The tenant management container intentionally has Docker-socket/root-equivalent access, while the agent container does not; retain this as an explicit trust boundary.
+6. **Verify upstream/runtime and release security.** No full OS/container/OpenClaw vulnerability scan or OpenClaw configuration audit was completed here. Scan the exact pinned images, run the upstream security audit, and document a patch/rollback cadence. At inspection GitHub secret scanning and push protection were enabled; default-branch protection and Dependabot security updates were disabled. Require successful checks before release and configure dependency update monitoring. Review provider/GitHub/Stripe administrator access and MFA separately; these were not verified.
+
+These blockers are independent of choosing the final brand/domain. Account/provider credentials and operational evidence cannot be replaced with placeholder values or a manually flipped release flag.
+
+## Checks completed
+
+- TypeScript typecheck, production build, formatting and diff-whitespace checks passed locally.
+- 56 automated tests passed using a disposable PostgreSQL 17 database on the existing UpCloud control host; the audit test containers/network were removed afterwards. A subsequently added security-release-gate test also passed locally. CI validates the final revision and packaged tenant bootstrap/lifecycle scripts.
+- Regression coverage includes management-route encodings, exact Origin checks, fresh billing access, cookie attributes and rejection of old session names. Existing tests cover invalid/wrong-mode Stripe signatures, replay/deduplication, owner isolation, credit concurrency/reversals, bootstrap retries, handoff reuse, suspension and retention.
+- `npm audit` reported **0 known vulnerabilities** for the installed lockfile on the review date. This covers npm advisories, not all application, container or upstream vulnerabilities.
+- A bounded high-confidence Git-history scan examined **158 blobs** and found no private-key blocks, long live Stripe keys, GitHub tokens or AWS access-key IDs. This is not a claim that every possible credential format was detected.
+- External read-only probes of the temporary control site returned 404 for `/.env` and `/.git/config`, and 401 for unauthenticated account/model APIs. Portal CSP, no-sniff and referrer headers were present. HSTS was absent from that temporary control proxy, although the repository's production control Caddyfile includes it.
+- No live charge, real customer data deletion, release-gate approval or production deployment was performed by this audit.
+
+## Reference checks
+
+- [Stripe webhook security and delivery behavior](https://docs.stripe.com/webhooks): signature verification requires the original body; delivery can duplicate/reorder.
+- [MDN cookie prefixes](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie): `__Host-` requires Secure, Path=/, and no Domain.
+- [ttyd command-line options](https://github.com/tsl0922/ttyd/blob/main/README.md): `-O` checks WebSocket origins.
+- [OpenClaw security audit](https://docs.openclaw.ai/gateway/security/running-the-audit): configuration/runtime checks remain a release requirement.

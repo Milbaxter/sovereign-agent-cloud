@@ -336,14 +336,17 @@ test("cross-account access and CSRF are rejected", async () => {
     let r = await app.inject({
       method: "POST",
       url: `/api/tenants/${tenant}/access`,
-      headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+      headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
       payload: {},
     });
     assert.equal(r.statusCode, 404);
     r = await app.inject({
       method: "POST",
       url: "/api/auth/logout",
-      headers: { origin: "https://evil.test", cookie: `session=${session}` },
+      headers: {
+        origin: "https://evil.test",
+        cookie: `__Host-session=${session}`,
+      },
       payload: {},
     });
     assert.equal(r.statusCode, 403);
@@ -362,7 +365,7 @@ test("fresh authentication required for credential-bearing export", async () => 
     const r = await app.inject({
       method: "POST",
       url: `/api/tenants/${tenant}/export`,
-      headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+      headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
       payload: { recipient: "age1" + "a".repeat(58) },
     });
     assert.equal(r.statusCode, 403);
@@ -682,7 +685,11 @@ test("email verification tokens are single-use and sessions contain only hashes"
     };
     const r = await app.inject(request);
     assert.equal(r.statusCode, 200);
+    assert.match(String(r.headers["set-cookie"]), /^__Host-session=/);
     assert.match(String(r.headers["set-cookie"]), /HttpOnly/);
+    assert.match(String(r.headers["set-cookie"]), /Secure/);
+    assert.match(String(r.headers["set-cookie"]), /Path=\//);
+    assert.doesNotMatch(String(r.headers["set-cookie"]), /Domain=/i);
     assert.equal((await app.inject(request)).statusCode, 401);
     assert.equal((await db.query("SELECT * FROM login_tokens")).rowCount, 0);
     assert.equal(
@@ -1056,7 +1063,7 @@ test("expired entitlement denies new access before the lifecycle worker catches 
   const request = {
     method: "POST" as const,
     url: `/api/tenants/${tenant}/access`,
-    headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+    headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
     payload: {},
   };
   assert.equal((await app.inject(request)).statusCode, 409);
@@ -1161,7 +1168,7 @@ test("paid founders retain cohort places after deletion; abandoned unpaid accoun
   const request = {
     method: "POST" as const,
     url: "/api/checkout",
-    headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+    headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
     payload: { mode: "byok" },
   };
   const full = await app.inject(request);
@@ -1171,4 +1178,49 @@ test("paid founders retain cohort places after deletion; abandoned unpaid accoun
     founderOrder,
   ]);
   assert.equal((await app.inject(request)).statusCode, 200);
+});
+
+test("billing portal rejects old sessions before contacting Stripe", async () => {
+  const session = token();
+  await db.query(
+    "INSERT INTO sessions(hash,account_id,created_at,expires_at) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour')",
+    [hash(session), account],
+  );
+  let calls = 0;
+  const billing = new Billing(db, c, {
+    billingPortal: {
+      sessions: {
+        create: async () => {
+          calls++;
+          return { url: "https://billing.stripe.com/test" };
+        },
+      },
+    },
+  } as any);
+  const app = await buildApp(c, db, [model], billing);
+  try {
+    const request = {
+      method: "POST" as const,
+      url: "/api/billing/portal",
+      headers: { origin: c.PUBLIC_ORIGIN, cookie: `__Host-session=${session}` },
+      payload: {},
+    };
+    const stale = await app.inject(request);
+    assert.equal(stale.statusCode, 403);
+    assert.equal(stale.json().error, "FRESH_LOGIN_REQUIRED");
+    assert.equal(calls, 0);
+    await db.query("UPDATE sessions SET created_at=now() WHERE hash=$1", [
+      hash(session),
+    ]);
+    assert.equal((await app.inject(request)).statusCode, 200);
+    assert.equal(calls, 1);
+    const legacy = await app.inject({
+      ...request,
+      headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+    });
+    assert.equal(legacy.statusCode, 401);
+    assert.equal(calls, 1);
+  } finally {
+    await app.close();
+  }
 });

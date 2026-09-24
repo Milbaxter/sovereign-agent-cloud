@@ -2,6 +2,7 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 import type { FastifyInstance } from "fastify";
 import type { DatabaseSync } from "node:sqlite";
 import { hash } from "../crypto.js";
+import { TENANT_COOKIE } from "./security.js";
 // Only connection metadata is inspected. Conversation frames are forwarded, never persisted.
 export function deviceFromConnect(data: string): string | null {
   try {
@@ -31,7 +32,7 @@ export function gatewayProxy(
   });
   app.server.on("upgrade", (request, socket, head) => {
     const cookie = app.parseCookie(request.headers.cookie ?? ""),
-      sid = cookie.agent_session,
+      sid = cookie[TENANT_COOKIE],
       sessionHash = sid ? hash(sid) : "";
     const session = db
       .prepare(
