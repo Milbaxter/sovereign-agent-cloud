@@ -27,6 +27,7 @@ s=open(p).read();s=re.sub(r'image: ghcr.io/openclaw/openclaw:[^\n]+','image: '+s
 p='/opt/sac/tenant.json'; b=json.load(open(p));b['openclawImage']=sys.argv[1];open(p,'w').write(json.dumps(b))
 PY
 docker compose --env-file /opt/sac/openclaw.env -f /opt/sac/compose.yml up -d --force-recreate
+docker exec sac-access /app/deploy/configure-browser.sh
 for i in $(seq 1 30); do
  if docker exec openclaw node dist/index.js health >/dev/null 2>&1; then
   trap - ERR

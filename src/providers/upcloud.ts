@@ -17,15 +17,19 @@ export class UpCloud {
       });
     return res.status === 204 ? null : res.json();
   }
-  async find(hostname: string) {
-    const found: any[] = [];
+  async list() {
+    const all: any[] = [];
     for (let offset = 0; ; offset += 100) {
       const result = await this.call(`/server?limit=100&offset=${offset}`),
         rows = result.servers?.server ?? [];
-      found.push(...rows.filter((s: any) => s.hostname === hostname));
+      all.push(...rows);
       if (rows.length < 100) break;
       if (offset > 10000) throw Error("UPCLOUD_PAGINATION_LIMIT");
     }
+    return all;
+  }
+  async find(hostname: string) {
+    const found = (await this.list()).filter((s) => s.hostname === hostname);
     if (found.length > 1) throw Error("DUPLICATE_PROVIDER_RESOURCES");
     return found[0];
   }

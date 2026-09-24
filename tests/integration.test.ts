@@ -695,3 +695,28 @@ test("insufficient credit is rejected before making an upstream request", async 
     delete process.env.TEST_INFERENCE_KEY;
   }
 });
+
+test("browser pairing extracts only a well-formed device connection key", async () => {
+  const { deviceFromConnect } = await import("../src/tenant/gateway-proxy.js");
+  assert.equal(
+    deviceFromConnect(
+      JSON.stringify({
+        type: "req",
+        method: "connect",
+        params: { device: { publicKey: "a".repeat(43) } },
+      }),
+    ),
+    "a".repeat(43),
+  );
+  assert.equal(
+    deviceFromConnect(
+      JSON.stringify({
+        type: "req",
+        method: "chat.send",
+        params: { device: { publicKey: "a".repeat(43) } },
+      }),
+    ),
+    null,
+  );
+  assert.equal(deviceFromConnect("not JSON"), null);
+});

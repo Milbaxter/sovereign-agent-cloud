@@ -24,11 +24,12 @@ $("#copy").onclick = run(async () => {
   notice("Gateway token copied. Paste it only into your OpenClaw dashboard.");
 });
 $("#devices").onclick = run(async () => {
-  $("#pending").textContent = JSON.stringify(
-    await api("/api/local/devices"),
-    null,
-    2,
-  );
+  const devices = await api("/api/local/devices");
+  $("#pending").textContent = JSON.stringify(devices, null, 2);
+  if (devices.pending?.length === 1) {
+    $('#pair input[name="requestId"]').value = devices.pending[0].requestId;
+    $('#pair input[name="publicKey"]').value = devices.pending[0].publicKey;
+  }
 });
 $("#pair").onsubmit = run(async () => {
   await api("/api/local/pair", Object.fromEntries(new FormData($("#pair"))));

@@ -124,7 +124,7 @@ await write(
 );
 await write(
   "/etc/caddy/Caddyfile",
-  `${b.hostname} {\n  header {\n    Referrer-Policy no-referrer\n    X-Content-Type-Options nosniff\n  }\n  @access path /handoff* /assets/* /internal/* /authorize /setup* /api/local/* /export*\n  handle @access { reverse_proxy 127.0.0.1:3080 }\n  handle {\n    forward_auth 127.0.0.1:3080 { uri /authorize }\n    handle /terminal* { reverse_proxy 127.0.0.1:7681 }\n    handle { reverse_proxy 127.0.0.1:18789 }\n  }\n}\n`,
+  `${b.hostname} {\n  header {\n    Referrer-Policy no-referrer\n    X-Content-Type-Options nosniff\n  }\n  @access path /handoff* /sac-assets/* /internal/* /authorize /setup* /api/local/* /export*\n  handle @access { reverse_proxy 127.0.0.1:3080 }\n  handle {\n    forward_auth 127.0.0.1:3080 { uri /authorize }\n    handle /terminal* { reverse_proxy 127.0.0.1:7681 }\n    @gatewaySocket header Upgrade websocket\n    handle @gatewaySocket { reverse_proxy 127.0.0.1:3080 }\n    handle { reverse_proxy 127.0.0.1:18789 }\n  }\n}\n`,
   0o644,
 );
 // Public-only networking plus host firewall: container egress cannot reach private peers/metadata.

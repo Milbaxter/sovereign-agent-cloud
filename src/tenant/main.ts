@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { consumeTicket } from "./tickets.js";
+import { gatewayProxy } from "./gateway-proxy.js";
 import { z } from "zod";
 import { token, hash } from "../crypto.js";
 const exec = promisify(execFile),
@@ -76,6 +77,7 @@ const claw = async (args: string[]) =>
     timeout: 60000,
     maxBuffer: 2_000_000,
   });
+gatewayProxy(app, db, origin);
 app.get("/authorize", async (req, reply) => {
   const s = auth(req);
   if (
@@ -125,7 +127,10 @@ app.get("/internal/status", async () => {
       Number(r.stdout.trim().split("\n").at(-1)!.trim().split(/\s+/)[3]),
     )
     .catch(() => 0);
-  return { installed, configured, freeDiskKiB: free };
+  const complete = await stat("/var/lib/sac/bootstrap-complete")
+    .then(() => true)
+    .catch(() => false);
+  return { installed: installed && complete, configured, freeDiskKiB: free };
 });
 app.post("/internal/prepaid", async () => {
   if (b.mode !== "credits" || !b.model || !b.inferenceKey)
@@ -221,7 +226,16 @@ app.get("/api/local/devices", async (req) => {
   if (s.action !== "access")
     throw Object.assign(Error("FORBIDDEN"), { statusCode: 403 });
   const { stdout } = await claw(["devices", "list", "--json"]);
-  return JSON.parse(stdout);
+  const data = JSON.parse(stdout);
+  const device = db
+    .prepare("SELECT public_key FROM session_devices WHERE session_hash=?")
+    .get(hash(req.cookies.agent_session!));
+  return {
+    pending: (data.pending ?? []).filter(
+      (p: any) =>
+        p.publicKey === device?.public_key && Number(p.ts) >= s.created,
+    ),
+  };
 });
 app.post("/api/local/pair", async (req) => {
   const s = auth(req);
@@ -234,10 +248,14 @@ app.post("/api/local/pair", async (req) => {
     })
     .parse(req.body);
   const data = JSON.parse((await claw(["devices", "list", "--json"])).stdout);
+  const device = db
+    .prepare("SELECT public_key FROM session_devices WHERE session_hash=?")
+    .get(hash(req.cookies.agent_session!));
   const pending = (data.pending ?? []).find(
     (p: any) =>
       p.requestId === requestId &&
       p.publicKey === publicKey &&
+      publicKey === device?.public_key &&
       Number(p.ts) >= s.created,
   );
   if (!pending)
@@ -308,7 +326,7 @@ app.post("/internal/backup", async (_req, reply) => {
 });
 await app.register(staticFiles, {
   root: resolve("tenant-public"),
-  prefix: "/assets/",
+  prefix: "/sac-assets/",
 });
 for (const route of ["/handoff", "/setup", "/export"])
   app.get(route, async (_req, reply) => reply.sendFile("index.html"));
@@ -319,5 +337,8 @@ setInterval(() => {
   for (const row of rows) void unlink(String(row.path)).catch(() => {});
   db.prepare("DELETE FROM exports WHERE expiry<?").run(Date.now());
   db.prepare("DELETE FROM sessions WHERE expiry<?").run(Date.now());
+  db.prepare(
+    "DELETE FROM session_devices WHERE session_hash NOT IN (SELECT hash FROM sessions)",
+  ).run();
 }, 60000).unref();
 await app.listen({ host: "127.0.0.1", port: 3080 });

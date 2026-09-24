@@ -1,13 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 umask 077
+container=${OPENCLAW_CONTAINER:-openclaw}
 recipient=$1
 output=$2
 work=$(mktemp -d /var/lib/sac/exports/staging.XXXXXX)
-was_running=$(docker inspect -f '{{.State.Running}}' openclaw)
-cleanup() { rm -rf "$work"; if [ "$was_running" = true ]; then docker start openclaw >/dev/null; fi; }
+was_running=$(docker inspect -f '{{.State.Running}}' "$container")
+cleanup() { rm -rf "$work"; if [ "$was_running" = true ]; then docker start "$container" >/dev/null; fi; }
 trap cleanup EXIT
-if [ "$was_running" = true ]; then docker stop openclaw >/dev/null; fi
+if [ "$was_running" = true ]; then docker stop "$container" >/dev/null; fi
 # Entire quiesced state, encrypted auth store, provider env, and a portable manifest.
 cp -a /var/lib/sac/state "$work/state"
 cp -a /var/lib/sac/auth "$work/auth"

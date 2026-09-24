@@ -14,10 +14,12 @@ image=$(jq -r .tenantImage /opt/sac/bundle.json)
 docker pull "$image"
 docker run --rm --network none -v /:/host "$image" node dist/tenant/bootstrap.js /host/opt/sac/bundle.json
 docker compose --env-file /opt/sac/openclaw.env -f /opt/sac/compose.yml up -d
+docker exec sac-access /app/deploy/configure-browser.sh
 sysctl --system >/dev/null
 systemctl daemon-reload
 systemctl enable --now sac-firewall.service sac-terminal.service
 systemctl reload ssh
 systemctl restart caddy
+touch /var/lib/sac/bootstrap-complete
 # Cloud-init's original userdata contains an expired single-use token only.
 rm -f /opt/sac/bundle.json
