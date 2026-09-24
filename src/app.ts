@@ -392,7 +392,7 @@ export async function buildApp(
     return { ok: true };
   });
   app.post("/api/billing/portal", async (req) => {
-    const who = await identity(req, db);
+    const who = await identity(req, db, true);
     const a = (
       await db.query("SELECT stripe_customer FROM accounts WHERE id=$1", [
         who.accountId,
