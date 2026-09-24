@@ -474,109 +474,147 @@ test("explicit UpCloud rejection clears credentials and allows a corrected retry
   assert.equal(creates, 2);
 });
 
-test("provider, single-use bootstrap, DNS and health retry reach owner setup", async (ctx) => {
-  await db.query(
-    "UPDATE tenants SET state='provisioning',mode='byok' WHERE id=$1",
-    [tenant],
-  );
-  const hostname = (
-    await db.query("SELECT hostname FROM tenants WHERE id=$1", [tenant])
-  ).rows[0].hostname;
-  const app = await buildApp(c, db, []);
-  ctx.after(() => app.close());
-  let creates = 0;
-  const remote = {
-    uuid: "vm-e2e",
-    hostname,
-    ip_addresses: {
-      ip_address: [
-        { access: "public", family: "IPv4", address: "203.0.113.2" },
-      ],
-    },
-    storage_devices: {
-      storage_device: [
-        { storage: "disk-e2e", type: "disk", storage_encrypted: "yes" },
-      ],
-    },
-  };
-  const cloud = new UpCloud(
-    { ...c, UPCLOUD_TOKEN: "test-token" },
-    async (url, init) => {
-      if (init?.method === "POST") {
-        creates++;
-        const { server } = JSON.parse(String(init.body));
-        assert.equal(server.metadata, "yes");
-        assert.ok(server.user_data.startsWith("#!/bin/bash"));
-        assert.ok(!server.user_data.includes("# BOOTSTRAP_VARIABLES"));
-        const payload = {
-          token: server.user_data.match(/BOOTSTRAP_TOKEN='([^']+)'/)[1],
-        };
-        const response = await app.inject({
-          method: "POST",
-          url: `/bootstrap/${tenant}`,
-          payload,
-        });
-        assert.equal(response.statusCode, 200);
-        assert.equal(response.json().managementKey, "secret");
-        assert.equal(response.json().tenantId, tenant);
-        assert.equal(response.json().mode, "byok");
-        assert.equal(
-          (
-            await app.inject({
-              method: "POST",
-              url: `/bootstrap/${tenant}`,
-              payload,
-            })
-          ).statusCode,
-          403,
+for (const dnsMode of ["cloudflare", "test_sslip"] as const) {
+  test(`${dnsMode}: provider, gated bootstrap, DNS and health retry reach owner setup`, async (ctx) => {
+    const journeyConfig = { ...c, DNS_MODE: dnsMode };
+    await db.query(
+      "UPDATE tenants SET state='provisioning',mode='byok' WHERE id=$1",
+      [tenant],
+    );
+    const hostname = (
+      await db.query("SELECT hostname FROM tenants WHERE id=$1", [tenant])
+    ).rows[0].hostname;
+    const app = await buildApp(c, db, []);
+    ctx.after(() => app.close());
+    let creates = 0;
+    let bootstrapPayload: { token: string };
+    let consumed = false;
+    const expectedHostname =
+      dnsMode === "test_sslip" ? `a-${tenant}.203-0-113-2.sslip.io` : hostname;
+    const remote = {
+      uuid: "vm-e2e",
+      hostname,
+      ip_addresses: {
+        ip_address: [
+          { access: "public", family: "IPv4", address: "203.0.113.2" },
+        ],
+      },
+      storage_devices: {
+        storage_device: [
+          { storage: "disk-e2e", type: "disk", storage_encrypted: "yes" },
+        ],
+      },
+    };
+    const cloud = new UpCloud(
+      { ...c, UPCLOUD_TOKEN: "test-token" },
+      async (url, init) => {
+        if (init?.method === "POST") {
+          creates++;
+          const { server } = JSON.parse(String(init.body));
+          assert.equal(server.metadata, "yes");
+          assert.ok(server.user_data.startsWith("#!/bin/bash"));
+          assert.ok(!server.user_data.includes("# BOOTSTRAP_VARIABLES"));
+          bootstrapPayload = {
+            token: server.user_data.match(/BOOTSTRAP_TOKEN='([^']+)'/)[1],
+          };
+          const response = await app.inject({
+            method: "POST",
+            url: `/bootstrap/${tenant}`,
+            payload: bootstrapPayload,
+          });
+          assert.equal(response.statusCode, 503);
+          assert.equal(response.json().error, "BOOTSTRAP_NOT_READY");
+          const pending = (
+            await db.query(
+              "SELECT bootstrap_hash,bootstrap_ready FROM tenants WHERE id=$1",
+              [tenant],
+            )
+          ).rows[0];
+          assert.equal(pending.bootstrap_hash, hash(bootstrapPayload.token));
+          assert.equal(pending.bootstrap_ready, false);
+          return new Response(JSON.stringify({ server: remote }), {
+            status: 202,
+          });
+        }
+        return new Response(
+          JSON.stringify(
+            String(url).includes("?")
+              ? { servers: { server: [] } }
+              : { server: remote },
+          ),
         );
-        return new Response(JSON.stringify({ server: remote }), {
-          status: 202,
-        });
-      }
-      return new Response(
-        JSON.stringify(
-          String(url).includes("?")
-            ? { servers: { server: [] } }
-            : { server: remote },
-        ),
-      );
-    },
-  );
-  let healthReady = false;
-  ctx.mock.method(
-    globalThis,
-    "fetch",
-    async (url: string, init: RequestInit) => {
-      assert.equal(url, `https://${hostname}/internal/status`);
-      assert.equal(
-        new Headers(init.headers).get("authorization"),
-        "Bearer secret",
-      );
-      return new Response(JSON.stringify({ installed: healthReady }));
-    },
-  );
-  const dns = {
-    ensure: async (name: string, ip: string) => {
-      assert.equal(name, hostname);
-      assert.equal(ip, "203.0.113.2");
-      return "dns-e2e";
-    },
-  };
-  const provisioner = new Provisioner(db, c, [], cloud, dns as any);
-  await assert.rejects(provisioner.provision(tenant), /WAITING_FOR_BOOTSTRAP/);
-  healthReady = true;
-  await provisioner.provision(tenant);
-  const row = (await db.query("SELECT * FROM tenants WHERE id=$1", [tenant]))
-    .rows[0];
-  assert.equal(creates, 1);
-  assert.equal(row.state, "awaiting_setup");
-  assert.equal(row.provider_id, "vm-e2e");
-  assert.deepEqual(row.disk_ids, ["disk-e2e"]);
-  assert.equal(row.dns_id, "dns-e2e");
-  assert.equal(row.bootstrap_hash, null);
-  assert.equal(row.bundle_cipher, null);
-});
+      },
+    );
+    let healthReady = false;
+    ctx.mock.method(
+      globalThis,
+      "fetch",
+      async (url: string, init: RequestInit) => {
+        assert.equal(url, `https://${expectedHostname}/internal/status`);
+        if (!consumed) {
+          const response = await app.inject({
+            method: "POST",
+            url: `/bootstrap/${tenant}`,
+            payload: bootstrapPayload,
+          });
+          assert.equal(response.statusCode, 200);
+          assert.equal(response.json().hostname, expectedHostname);
+          assert.equal(response.json().managementKey, "secret");
+          assert.equal(response.json().tenantId, tenant);
+          assert.equal(response.json().mode, "byok");
+          assert.equal(
+            (
+              await app.inject({
+                method: "POST",
+                url: `/bootstrap/${tenant}`,
+                payload: bootstrapPayload,
+              })
+            ).statusCode,
+            403,
+          );
+          consumed = true;
+        }
+        assert.equal(
+          new Headers(init.headers).get("authorization"),
+          "Bearer secret",
+        );
+        return new Response(JSON.stringify({ installed: healthReady }));
+      },
+    );
+    const dns = {
+      ensure: async (name: string, ip: string) => {
+        assert.equal(name, expectedHostname);
+        assert.equal(ip, "203.0.113.2");
+        return "dns-e2e";
+      },
+    };
+    const provisioner = new Provisioner(
+      db,
+      journeyConfig,
+      [],
+      cloud,
+      dns as any,
+    );
+    await assert.rejects(
+      provisioner.provision(tenant),
+      /WAITING_FOR_BOOTSTRAP/,
+    );
+    healthReady = true;
+    await provisioner.provision(tenant);
+    const row = (await db.query("SELECT * FROM tenants WHERE id=$1", [tenant]))
+      .rows[0];
+    assert.equal(creates, 1);
+    assert.equal(row.state, "awaiting_setup");
+    assert.equal(row.provider_id, "vm-e2e");
+    assert.deepEqual(row.disk_ids, ["disk-e2e"]);
+    assert.equal(row.hostname, expectedHostname);
+    assert.equal(row.provider_hostname, hostname);
+    assert.equal(row.bootstrap_ready, true);
+    assert.equal(row.dns_id, "dns-e2e");
+    assert.equal(row.bootstrap_hash, null);
+    assert.equal(row.bundle_cipher, null);
+  });
+}
 
 test("provider retry finds VM after response loss without creating again", async () => {
   await db.query(
@@ -687,6 +725,7 @@ for (const adopted of [false, true]) {
         await db.query("SELECT * FROM tenants WHERE id=$1", [tenant])
       ).rows[0];
       assert.equal(row.provider_id, "vm1");
+      assert.equal(row.bootstrap_ready, encrypted === "yes");
       assert.deepEqual(row.disk_ids, ["disk1"]);
       assert.equal(creates, adopted ? 0 : 1);
       assert.equal(dnsCalls, encrypted === "yes" ? 1 : 0);
@@ -698,6 +737,53 @@ for (const adopted of [false, true]) {
     });
   }
 }
+
+test("bootstrap readiness never exposes credentials on early, invalid, expired or replayed requests", async (ctx) => {
+  const secret = token();
+  const app = await buildApp(c, db, []);
+  ctx.after(() => app.close());
+  await db.query(
+    "UPDATE tenants SET bootstrap_hash=$2,bootstrap_expires_at=now()+interval '30 minutes',bundle_cipher=$3,bootstrap_ready=false WHERE id=$1",
+    [
+      tenant,
+      hash(secret),
+      seal(
+        JSON.stringify({ tenantId: tenant, managementKey: "private-value" }),
+        c.ENCRYPTION_KEY,
+      ),
+    ],
+  );
+  const request = (value: string) =>
+    app.inject({
+      method: "POST",
+      url: `/bootstrap/${tenant}`,
+      payload: { token: value },
+    });
+  assert.equal((await request(token())).statusCode, 403);
+  for (let i = 0; i < 2; i++) {
+    const early = await request(secret);
+    assert.equal(early.statusCode, 503);
+    assert.equal(early.json().error, "BOOTSTRAP_NOT_READY");
+    assert.equal(early.headers["retry-after"], "5");
+    assert.ok(!early.body.includes("private-value"));
+  }
+  assert.equal(
+    (await db.query("SELECT bootstrap_hash FROM tenants WHERE id=$1", [tenant]))
+      .rows[0].bootstrap_hash,
+    hash(secret),
+  );
+  await db.query(
+    "UPDATE tenants SET bootstrap_ready=true,bootstrap_expires_at=now()-interval '1 second' WHERE id=$1",
+    [tenant],
+  );
+  assert.equal((await request(secret)).statusCode, 403);
+  await db.query(
+    "UPDATE tenants SET bootstrap_expires_at=now()+interval '5 minutes' WHERE id=$1",
+    [tenant],
+  );
+  const responses = await Promise.all([request(secret), request(secret)]);
+  assert.deepEqual(responses.map((r) => r.statusCode).sort(), [200, 403]);
+});
 
 test("email verification tokens are single-use and sessions contain only hashes", async () => {
   const secret = token();
