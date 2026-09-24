@@ -25,5 +25,5 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: bash -n deploy/*.sh scripts/*.sh
+      - run: for script in deploy/*.sh scripts/*.sh; do bash -n "$script"; done
       - run: npm audit --omit=dev

@@ -1,8 +1,6 @@
 import { config, models } from "../src/config.js";
 import { UpCloud } from "../src/providers/upcloud.js";
 import { imagePin } from "../src/provision.js";
-import { Billing } from "../src/billing.js";
-import { database } from "../src/db.js";
 const c = config(),
   checks: { name: string; ok: boolean; detail?: string }[] = [];
 const check = (name: string, ok: boolean, detail?: string) =>

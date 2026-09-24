@@ -31,7 +31,8 @@ export async function buildApp(
     },
     logController: new LogController({ disableRequestLogging: true }),
     bodyLimit: 1_000_000,
-    trustProxy: false,
+    // API is exposed only through Caddy and a loopback host port; trust that one hop.
+    trustProxy: (_address: string, hop: number) => hop === 0,
   });
   await app.register(cookie);
   await app.register(rateLimit, { max: 120, timeWindow: "1 minute" });
