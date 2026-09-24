@@ -15,7 +15,7 @@ Register `/webhooks/stripe` for:
 
 Preserve the raw request body for signature verification. This implementation uses a dedicated raw-body route. Test and live modes require separate deployments, databases, signing keys, and resource labels.
 
-`GET /api/catalog` reports effective checkout availability after the live evidence gate, and provides price disclosures, verified managed models, locations, and published rates. `GET /api/me` provides account-scoped status and wallet totals (integer micro-euros serialized as strings). `docs/openapi.json` contains the public contract.
+`GET /api/catalog` reports effective checkout availability after the live evidence gate, and provides price disclosures, verified managed models, locations, and published rates. `GET /api/me` provides account-scoped status and wallet totals (integer micro-euros serialized as strings). `wallet.usageReviewRequired` explains a managed-inference billing hold; top-ups do not remove it. Suspended VMs are offline, so export returns `AGENT_OFFLINE_CONTACT_SUPPORT_FOR_EXPORT` (409) and SSH changes return `AGENT_NOT_READY` (409). `docs/openapi.json` contains the public contract.
 
 The landing page reads only `/api/catalog`, without credentials, to describe availability. It distinguishes test billing, disabled checkout, unavailable credit models, and failed catalog requests. Opening the portal remains possible in every state; navigation does not grant payment or agent access. The marketing page never requests `/api/me` or calls checkout itself. There are no new APIs, external scripts, trackers, or frontend secrets. Its local SVG favicon works with the backend's existing Content Security Policy.
 

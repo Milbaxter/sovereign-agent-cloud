@@ -81,3 +81,39 @@ test("live launch requires storage encryption evidence even when other gates pas
   await writeFile(path, JSON.stringify(evidence));
   assert.doesNotThrow(() => launchGate(c));
 });
+
+test("parking stops the VM and verifies a non-compute-billed plan without deleting disks", async () => {
+  const cloud = new UpCloud({} as Config);
+  let state = "started",
+    plan = "STARTER-2xCPU-4GB";
+  const actions: string[] = [];
+  cloud.details = async () => ({ state, plan });
+  cloud.call = async (path, method, body: any) => {
+    if (path.endsWith("/stop")) {
+      assert.equal(body.stop_server.timeout, 120);
+      actions.push("stop");
+      state = "stopped";
+    } else {
+      assert.equal(method, "PUT");
+      assert.equal(state, "stopped");
+      assert.deepEqual(body, { server: { plan: "CLOUDNATIVE-1xCPU-4GB" } });
+      actions.push("plan");
+      plan = body.server.plan;
+    }
+  };
+  await cloud.park("vm1");
+  await cloud.park("vm1");
+  assert.deepEqual(actions, ["stop", "plan"]);
+});
+
+test("parking waits for confirmed shutdown and rejects an unconfirmed plan change", async () => {
+  const cloud = new UpCloud({} as Config);
+  let state = "started";
+  cloud.details = async () => ({ state, plan: "STARTER-2xCPU-4GB" });
+  cloud.call = async (_path, method) => {
+    assert.notEqual(method, "DELETE");
+  };
+  await assert.rejects(cloud.park("vm1"), /WAITING_FOR_STOP/);
+  state = "stopped";
+  await assert.rejects(cloud.park("vm1"), /PROVIDER_PLAN_NOT_CONFIRMED/);
+});

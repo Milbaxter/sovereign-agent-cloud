@@ -168,7 +168,15 @@ export async function buildApp(
         [who.accountId],
       )
     ).rows[0] ?? { balance: "0", reserved: "0", debt: "0" };
-    return { email: account.email, tenants, wallet };
+    const held = await db.query(
+      "SELECT 1 FROM requests WHERE account_id=$1 AND (state='unknown' OR (state='reserved' AND created_at<now()-interval '5 minutes')) LIMIT 1",
+      [who.accountId],
+    );
+    return {
+      email: account.email,
+      tenants,
+      wallet: { ...wallet, usageReviewRequired: !!held.rowCount },
+    };
   });
   app.post("/api/checkout", async (req) => {
     const who = await identity(req, db),
@@ -369,7 +377,11 @@ export async function buildApp(
       { recipient } = z
         .object({ recipient: z.string().regex(/^age1[0-9a-z]{58}$/) })
         .parse(req.body);
-    if (!["awaiting_setup", "ready", "suspended"].includes(t.state))
+    if (t.state === "suspended")
+      throw Object.assign(Error("AGENT_OFFLINE_CONTACT_SUPPORT_FOR_EXPORT"), {
+        statusCode: 409,
+      });
+    if (!["awaiting_setup", "ready"].includes(t.state))
       throw Object.assign(Error("EXPORT_UNAVAILABLE"), { statusCode: 409 });
     await audit(db, t.account_id, t.id, "export");
     return {
@@ -387,6 +399,8 @@ export async function buildApp(
           sourceIp: z.string().refine((v) => isIP(v) === 4),
         })
         .parse(req.body);
+    if (!["awaiting_setup", "ready"].includes(t.state))
+      throw Object.assign(Error("AGENT_NOT_READY"), { statusCode: 409 });
     await tenantCall(c, t, "ssh-key", { publicKey, sourceIp });
     await audit(db, t.account_id, t.id, "ssh_key_added");
     return { ok: true };

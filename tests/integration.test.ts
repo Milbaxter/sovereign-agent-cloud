@@ -11,7 +11,7 @@ import {
   reserve,
   settle,
   price,
-  releaseUnknown,
+  quarantineStaleUsage,
 } from "../src/ledger.js";
 import { hash, token, seal, unseal, handoff } from "../src/crypto.js";
 import { Billing } from "../src/billing.js";
@@ -136,7 +136,7 @@ test("settlement is idempotent and releases unused reserve", async () => {
   assert.equal(w.balance, "9750");
   assert.equal(w.reserved, "0");
 });
-test("unknown usage holds funds then is waived without inventing a charge", async () => {
+test("unknown usage holds funds beyond 24 hours and blocks reuse until reconciled", async () => {
   await transaction(db, (tx) => credit(tx, account, "topup", 10000n));
   const id = await reserve(db, account, tenant, model, 1000);
   await settle(db, id, model, null);
@@ -145,14 +145,44 @@ test("unknown usage holds funds then is waived without inventing a charge", asyn
     "unknown",
   );
   await db.query("UPDATE requests SET created_at=now()-interval '25 hours'");
-  await releaseUnknown(db);
+  await quarantineStaleUsage(db);
+  await quarantineStaleUsage(db);
   const w = (await db.query("SELECT * FROM wallets")).rows[0];
   assert.equal(w.balance, "10000");
-  assert.equal(w.reserved, "0");
+  assert.equal(w.reserved, "2500");
   assert.equal(
     (await db.query("SELECT state FROM requests")).rows[0].state,
-    "waived",
+    "unknown",
   );
+  await assert.rejects(
+    reserve(db, account, tenant, model, 1000),
+    /USAGE_RECONCILIATION_REQUIRED/,
+  );
+  await transaction(db, (tx) => credit(tx, account, "extra-topup", 10000n));
+  await assert.rejects(
+    reserve(db, account, tenant, model, 1000),
+    /USAGE_RECONCILIATION_REQUIRED/,
+  );
+  await settle(
+    db,
+    id,
+    {
+      ...model,
+      rateVersion: "new-version",
+      outputMicroEurPerMillion: 999999999n,
+    },
+    { prompt_tokens: 100, completion_tokens: 100 },
+    "provider-record-123",
+  );
+  const reconciled = (await db.query("SELECT * FROM wallets")).rows[0];
+  assert.equal(reconciled.balance, "19750");
+  assert.equal(reconciled.reserved, "0");
+  assert.equal(
+    (await db.query("SELECT metadata FROM ledger WHERE kind='usage'")).rows[0]
+      .metadata.reconciliationEvidence,
+    "provider-record-123",
+  );
+  await reserve(db, account, tenant, model, 1000);
 });
 test("refund during a request records debt without negative balances", async () => {
   const order = randomUUID();
@@ -1032,4 +1062,213 @@ test("paid founders retain cohort places after deletion; abandoned unpaid accoun
     founderOrder,
   ]);
   assert.equal((await app.inject(request)).statusCode, 200);
+});
+
+test("a crashed request blocks dispatch before maintenance and keeps its reserve", async () => {
+  await transaction(db, (tx) => credit(tx, account, "topup", 10000n));
+  const id = await reserve(db, account, tenant, model, 1000);
+  await db.query(
+    "UPDATE requests SET created_at=now()-interval '6 minutes' WHERE id=$1",
+    [id],
+  );
+  await assert.rejects(
+    reserve(db, account, tenant, model, 1000),
+    /USAGE_RECONCILIATION_REQUIRED/,
+  );
+  await Promise.all([quarantineStaleUsage(db), quarantineStaleUsage(db)]);
+  assert.equal(
+    (await db.query("SELECT reserved FROM wallets")).rows[0].reserved,
+    "2500",
+  );
+  assert.equal((await db.query("SELECT * FROM incidents")).rowCount, 1);
+  // A late usage response can still settle exactly once after quarantine.
+  await Promise.all([
+    settle(db, id, model, { prompt_tokens: 100, completion_tokens: 100 }),
+    quarantineStaleUsage(db),
+  ]);
+  assert.equal(
+    (await db.query("SELECT balance,reserved FROM wallets")).rows[0].balance,
+    "9750",
+  );
+  await reserve(db, account, tenant, model, 1000);
+});
+
+test("confirmed unbilled usage releases a hold without charging", async () => {
+  await transaction(db, (tx) => credit(tx, account, "topup", 10000n));
+  const id = await reserve(db, account, tenant, model, 1000);
+  await settle(db, id, model, null);
+  await settle(
+    db,
+    id,
+    model,
+    { prompt_tokens: 0, completion_tokens: 0 },
+    "provider-confirmed-unbilled",
+  );
+  assert.deepEqual(
+    (await db.query("SELECT balance,reserved FROM wallets")).rows[0],
+    { balance: "10000", reserved: "0" },
+  );
+  assert.equal(
+    (await db.query("SELECT * FROM incidents WHERE resolved_at IS NULL"))
+      .rowCount,
+    0,
+  );
+});
+
+test("unresolved usage rejects HTTP inference before another provider call", async (t) => {
+  await transaction(db, (tx) => credit(tx, account, "topup", 10000n));
+  const id = await reserve(db, account, tenant, model, 1000);
+  await settle(db, id, model, null);
+  const key = token();
+  await db.query("UPDATE tenants SET inference_key_hash=$2 WHERE id=$1", [
+    tenant,
+    hash(key),
+  ]);
+  process.env.TEST_INFERENCE_KEY = "test-only";
+  t.after(() => {
+    delete process.env.TEST_INFERENCE_KEY;
+  });
+  t.mock.method(globalThis, "fetch", async () => {
+    throw Error("unexpected upstream call");
+  });
+  const app = await buildApp(c, db, [model]);
+  t.after(() => app.close());
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/chat/completions",
+    headers: { authorization: `Bearer ${key}` },
+    payload: { model: model.id, messages: [{ role: "user", content: "test" }] },
+  });
+  assert.equal(response.statusCode, 402);
+  assert.equal(response.json().error, "USAGE_RECONCILIATION_REQUIRED");
+});
+
+test("suspension parks compute despite unreachable tenant and backup, and retries safely", async (t) => {
+  const { Worker } = await import("../src/worker.js");
+  await db.query(
+    "UPDATE tenants SET paid_until=now()-interval '1 day',provider_id='vm1' WHERE id=$1",
+    [tenant],
+  );
+  const worker = new Worker(db, c, [model]);
+  let plan = "STARTER-2xCPU-4GB",
+    attempts = 0;
+  worker.provisioner.cloud.details = async () => ({
+    hostname: `${tenant}.agents.test`,
+    plan,
+  });
+  worker.backups.take = async () => {
+    throw Error("BACKUP_UNAVAILABLE");
+  };
+  t.mock.method(globalThis, "fetch", async () => {
+    throw Error("TENANT_UNREACHABLE");
+  });
+  worker.provisioner.cloud.park = async () => {
+    attempts++;
+    // Simulate provider accepting the plan change then losing the response.
+    plan = "CLOUDNATIVE-1xCPU-4GB";
+    if (attempts === 1) throw Error("NETWORK_FAILURE");
+  };
+  await assert.rejects(
+    worker.handle("suspend", { tenantId: tenant }),
+    /NETWORK_FAILURE/,
+  );
+  const first = (await db.query("SELECT * FROM tenants")).rows[0];
+  assert.equal(first.state, "suspended");
+  assert.equal(first.resume_plan, "STARTER-2xCPU-4GB");
+  await worker.handle("suspend", { tenantId: tenant });
+  const second = (await db.query("SELECT * FROM tenants")).rows[0];
+  assert.equal(second.resume_plan, first.resume_plan);
+  assert.equal(+second.delete_after, +first.delete_after);
+  assert.equal(attempts, 2);
+  // A previously queued backup cannot wake or call a parked tenant.
+  await worker.handle("backup", { tenantId: tenant });
+});
+
+test("paid recovery restores saved plan before starting and survives an HTTP retry", async (t) => {
+  const { Worker } = await import("../src/worker.js");
+  await db.query(
+    "UPDATE tenants SET state='suspended',provider_id='vm1',resume_plan='STARTER-2xCPU-4GB',suspended_at=now(),delete_after=now()+interval '30 days' WHERE id=$1",
+    [tenant],
+  );
+  const worker = new Worker(db, c, [model]);
+  let plan = "CLOUDNATIVE-1xCPU-4GB",
+    state = "stopped",
+    http = 0;
+  const actions: string[] = [];
+  worker.provisioner.cloud.details = async () => ({
+    hostname: `${tenant}.agents.test`,
+    plan,
+    state,
+  });
+  worker.provisioner.cloud.stop = async () => {
+    state = "stopped";
+  };
+  worker.provisioner.cloud.changeStoppedPlan = async (_id, next) => {
+    assert.equal(state, "stopped");
+    plan = next;
+    actions.push("restore-plan");
+  };
+  worker.provisioner.cloud.start = async () => {
+    assert.equal(plan, "STARTER-2xCPU-4GB");
+    state = "started";
+    actions.push("start");
+  };
+  t.mock.method(globalThis, "fetch", async () => {
+    actions.push("resume-agent");
+    if (++http === 1) throw Error("BOOTING");
+    return Response.json({ ok: true });
+  });
+  await assert.rejects(
+    worker.handle("resume", { tenantId: tenant }),
+    /BOOTING/,
+  );
+  assert.equal(
+    (await db.query("SELECT state FROM tenants")).rows[0].state,
+    "suspended",
+  );
+  await worker.handle("resume", { tenantId: tenant });
+  assert.deepEqual(actions, [
+    "restore-plan",
+    "start",
+    "resume-agent",
+    "start",
+    "resume-agent",
+  ]);
+  const row = (await db.query("SELECT * FROM tenants")).rows[0];
+  assert.equal(row.state, "awaiting_setup");
+  assert.equal(row.resume_plan, null);
+  assert.equal(row.delete_after, null);
+});
+
+test("expired entitlement cannot restart retained compute", async () => {
+  const { Worker } = await import("../src/worker.js");
+  await db.query(
+    "UPDATE tenants SET state='suspended',paid_until=now()-interval '1 day',provider_id='vm1',resume_plan='STARTER-2xCPU-4GB' WHERE id=$1",
+    [tenant],
+  );
+  const worker = new Worker(db, c, [model]);
+  worker.provisioner.cloud.details = async () => {
+    throw Error("must not touch cloud");
+  };
+  await worker.handle("resume", { tenantId: tenant });
+  assert.equal(
+    (await db.query("SELECT state FROM tenants")).rows[0].state,
+    "suspended",
+  );
+});
+
+test("lifecycle operations serialize against a competing tenant operation", async () => {
+  const { Worker } = await import("../src/worker.js");
+  const conn = await db.connect();
+  try {
+    await conn.query("SELECT pg_advisory_lock(hashtext($1))", [tenant]);
+    const worker = new Worker(db, c, [model]);
+    await assert.rejects(
+      worker.handle("suspend", { tenantId: tenant }),
+      /TENANT_BUSY/,
+    );
+  } finally {
+    await conn.query("SELECT pg_advisory_unlock(hashtext($1))", [tenant]);
+    conn.release();
+  }
 });

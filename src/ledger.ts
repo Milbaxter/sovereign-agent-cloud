@@ -132,6 +132,14 @@ export async function reserve(
         account,
       ])
     ).rows[0];
+    const unresolved = await tx.query(
+      "SELECT 1 FROM requests WHERE account_id=$1 AND (state='unknown' OR (state='reserved' AND created_at<now()-interval '5 minutes')) LIMIT 1",
+      [account],
+    );
+    if (unresolved.rowCount)
+      throw Object.assign(Error("USAGE_RECONCILIATION_REQUIRED"), {
+        statusCode: 402,
+      });
     if (
       !w ||
       BigInt(w.debt) > 0n ||
@@ -143,8 +151,18 @@ export async function reserve(
       [account, amount.toString()],
     );
     await tx.query(
-      "INSERT INTO requests(id,account_id,tenant_id,model_id,rate_version,reserved) VALUES($1,$2,$3,$4,$5,$6)",
-      [id, account, tenant, model.id, model.rateVersion, amount.toString()],
+      "INSERT INTO requests(id,account_id,tenant_id,model_id,rate_version,reserved,rates) VALUES($1,$2,$3,$4,$5,$6,$7)",
+      [
+        id,
+        account,
+        tenant,
+        model.id,
+        model.rateVersion,
+        amount.toString(),
+        JSON.stringify(model, (_, value) =>
+          typeof value === "bigint" ? value.toString() : value,
+        ),
+      ],
     );
   });
   return id;
@@ -159,12 +177,26 @@ export async function settle(
     prompt_tokens_details?: { cached_tokens?: number };
     completion_tokens_details?: { reasoning_tokens?: number };
   } | null,
+  evidence?: string,
 ) {
   await transaction(db, async (tx) => {
     const r = (
       await tx.query("SELECT * FROM requests WHERE id=$1 FOR UPDATE", [id])
     ).rows[0];
     if (!r || !["reserved", "unknown"].includes(r.state)) return;
+    // Serialize quarantining with new reservations on the same wallet.
+    await tx.query("SELECT 1 FROM wallets WHERE account_id=$1 FOR UPDATE", [
+      r.account_id,
+    ]);
+    if (r.rates)
+      model = {
+        ...r.rates,
+        inputMicroEurPerMillion: BigInt(r.rates.inputMicroEurPerMillion),
+        cachedMicroEurPerMillion: BigInt(r.rates.cachedMicroEurPerMillion),
+        outputMicroEurPerMillion: BigInt(r.rates.outputMicroEurPerMillion),
+      };
+    if (model.id !== r.model_id || model.rateVersion !== r.rate_version)
+      throw Error("ORIGINAL_RATE_VERSION_REQUIRED");
     if (!usage) {
       await tx.query("UPDATE requests SET state='unknown' WHERE id=$1", [id]);
       await incident(tx, `usage:${id}`, "missing_usage", r.tenant_id, {
@@ -236,6 +268,7 @@ export async function settle(
           model: model.id,
           rateVersion: model.rateVersion,
           usage: billable,
+          ...(evidence ? { reconciliationEvidence: evidence } : {}),
         }),
       ],
     );
@@ -243,12 +276,16 @@ export async function settle(
       "UPDATE requests SET state='settled',charged=$2,usage=$3 WHERE id=$1",
       [id, charged.toString(), JSON.stringify(billable)],
     );
+    await tx.query(
+      "UPDATE incidents SET resolved_at=now() WHERE key IN ($1,$2)",
+      [`usage:${id}`, `stale-usage:${id}`],
+    );
   });
 }
-export async function releaseUnknown(db: DB) {
+export async function quarantineStaleUsage(db: DB) {
   const rows = (
     await db.query(
-      "SELECT id FROM requests WHERE state IN ('reserved','unknown') AND created_at<now()-interval '24 hours'",
+      "SELECT id FROM requests WHERE state='reserved' AND created_at<now()-interval '5 minutes'",
     )
   ).rows;
   for (const { id } of rows)
@@ -256,19 +293,15 @@ export async function releaseUnknown(db: DB) {
       const r = (
         await tx.query("SELECT * FROM requests WHERE id=$1 FOR UPDATE", [id])
       ).rows[0];
-      if (!["reserved", "unknown"].includes(r.state)) return;
-      await tx.query(
-        "UPDATE wallets SET reserved=reserved-$2 WHERE account_id=$1",
-        [r.account_id, r.reserved],
-      );
-      await tx.query(
-        "UPDATE requests SET state='waived',charged=0 WHERE id=$1",
-        [id],
-      );
+      if (r.state !== "reserved") return;
+      await tx.query("SELECT 1 FROM wallets WHERE account_id=$1 FOR UPDATE", [
+        r.account_id,
+      ]);
+      await tx.query("UPDATE requests SET state='unknown' WHERE id=$1", [id]);
       await incident(
         tx,
-        `waived:${id}`,
-        "unreconciled_usage_waived",
+        `stale-usage:${id}`,
+        "usage_reconciliation_required",
         r.tenant_id,
         { requestId: id },
       );

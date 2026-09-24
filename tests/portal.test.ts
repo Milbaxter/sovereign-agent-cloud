@@ -121,3 +121,30 @@ test("signed-in users can request fresh authentication without signing out", asy
   });
   assert.match(page.get("#notice").textContent, /Check your email/);
 });
+
+test("suspended owners see offline retention guidance and no unusable export action", async () => {
+  const page = await portal("suspended");
+  const section = page.get("#agent").children[0];
+  assert.ok(
+    section.children.some((e) => /server is offline/.test(e.textContent)),
+  );
+  const forms = section.children.filter((e) => e.tag === "form");
+  assert.equal(
+    forms[0].children.find((e) => e.tag === "button")!.disabled,
+    true,
+  );
+  assert.equal(
+    forms[1].children.find((e) => e.tag === "button")!.disabled,
+    true,
+  );
+});
+
+test("wallet review explains why adding credit will not unlock inference", async () => {
+  const page = await portal("ready");
+  Object.assign(page.customer.wallet, { usageReviewRequired: true });
+  await runInNewContext("refresh()", page.context);
+  assert.match(
+    page.get("#balance").textContent,
+    /buying more credits will not clear/,
+  );
+});
