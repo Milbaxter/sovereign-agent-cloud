@@ -23,6 +23,7 @@ jobs:
       - run: npm ci
       - run: npm run format:check
       - run: npm run typecheck
+      - run: npm run journey:check
       - run: npm test
       - run: npm run build
       - run: for script in deploy/*.sh scripts/*.sh; do bash -n "$script"; done

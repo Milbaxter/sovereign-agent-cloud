@@ -1,0 +1,70 @@
+name: Customer journey (approved live test)
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_image:
+        description: Published immutable runtime tag AND sha256 digest
+        required: true
+        type: string
+      authorization_reference:
+        description: Reference to the policy owner's approval of this browser testing environment
+        required: true
+        type: string
+permissions:
+  contents: read
+  deployments: read
+concurrency:
+  group: live-customer-journey
+  cancel-in-progress: false
+jobs:
+  journey:
+    environment: customer-journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      JOURNEY_LIVE_ENABLED: ${{ vars.JOURNEY_LIVE_ENABLED }}
+      JOURNEY_RUNTIME_IMAGE: ${{ inputs.runtime_image }}
+      JOURNEY_AUTHORIZATION_REFERENCE: ${{ inputs.authorization_reference }}
+      JOURNEY_CLOUD_BUDGET_EUR: '9.98'
+      UPCLOUD_TOKEN: ${{ secrets.UPCLOUD_TOKEN }}
+      UPCLOUD_TEMPLATE: ${{ vars.UPCLOUD_TEMPLATE }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      RESEND_SMTP_PASSWORD: ${{ secrets.RESEND_SMTP_PASSWORD }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      TEST_ACCOUNT_EMAIL: ${{ secrets.TEST_ACCOUNT_EMAIL }}
+      GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+      GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+      GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '24', cache: npm}
+      - run: npm ci
+      - name: Verify required environment approval
+        run: node --import tsx scripts/journey/authorize-ci.ts
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: npm run journey:check
+      - run: npx playwright install --with-deps chromium
+      - name: Run BYOK then managed credits with fresh deployments
+        run: npm run journey:test
+      - name: Retry cleanup independently of runner success
+        if: always()
+        timeout-minutes: 8
+        shell: bash
+        run: |
+          result=0
+          for mode in byok credits; do
+            if [ -f "data/journey-run/$mode/state.json" ]; then
+              JOURNEY_STATE_DIR="data/journey-run/$mode" JOURNEY_REPORT_DIR="journey-report/$mode" npm run journey:cleanup || result=1
+            fi
+          done
+          exit "$result"
+      - name: Upload only sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: customer-journey-evidence
+          path: journey-report/
+          retention-days: 7
+          if-no-files-found: ignore

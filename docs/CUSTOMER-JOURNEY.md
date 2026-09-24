@@ -8,6 +8,8 @@ The customer journey is **not yet passed**. The code now supports a temporary HT
 
 The 24 September 2026 attempt deployed an encrypted Helsinki control server, applied all four migrations, and verified public HTTPS and model access. Browser access was denied because Codex could not verify its admin-enforced browser policy. No customer journey was started. Cleanup returned the cloud inventory to empty and disabled the test webhook. See [the attempt report](CUSTOMER-JOURNEY-2026-09-24.md) for evidence and outstanding checks. Recheck promotional-credit expiry before another deployment.
 
+A prepared, disabled-by-default [Playwright runner](PLAYWRIGHT-JOURNEY.md) now automates the clean journeys and records their evidence. It has not run in a browser. Its coverage matrix explicitly separates the remaining live fault and lifecycle scenarios.
+
 ## Configuration
 
 Use a private ignored environment file. Required external credentials are `STRIPE_SECRET_KEY` (test), `OPENAI_API_KEY`, and the Resend API key (saved as `RESEND_SMTP_PASSWORD` for this run). `TEST_ACCOUNT_EMAIL` must be the address registered with Resend when using `onboarding@resend.dev`; use that same inbox for the Stripe test customer. Stripe's account API did not return an account email in this run, so do not infer one. Never include credential values in evidence. Configure Resend via `SMTP_URL` with TLS at `smtp.resend.com:465`, username `resend`, and the API key as password, percent-encoding credentials.

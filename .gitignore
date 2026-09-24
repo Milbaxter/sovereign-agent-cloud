@@ -10,3 +10,6 @@ coverage/
 *.pem
 *.age
 .DS_Store
+journey-report/
+playwright-report/
+test-results/

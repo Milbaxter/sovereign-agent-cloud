@@ -1,0 +1,26 @@
+import { defineConfig } from "@playwright/test";
+export default defineConfig({
+  globalSetup: "./e2e/preflight.ts",
+  testDir: "./e2e",
+  testMatch: "customer.spec.ts",
+  fullyParallel: false,
+  workers: 1,
+  retries: 0,
+  timeout: 30 * 60 * 1000,
+  globalTimeout: 35 * 60 * 1000,
+  expect: { timeout: 20000 },
+  reporter: [["./e2e/reporter.ts"]],
+  outputDir: "data/playwright-private",
+  use: {
+    browserName: "chromium",
+    headless: true,
+    locale: "en-US",
+    viewport: { width: 1440, height: 1000 },
+    ignoreHTTPSErrors: false,
+    trace: "off",
+    video: "off",
+    screenshot: "off",
+    actionTimeout: 20000,
+    navigationTimeout: 60000,
+  },
+});
