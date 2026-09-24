@@ -6,11 +6,11 @@ Base commit: `39983d4e9ea02fadfef97436e137c6b94c72e9a9` (merged main).
 
 The customer journey is **not yet passed**. The code now supports a temporary HTTPS deployment through the real provisioning worker without a Cloudflare zone. Bootstrap cannot expose credentials until the worker has verified encrypted disks and prepared DNS. The test hostname is separate from immutable provider identity, which is also used by suspension and recovery.
 
-Read-only UpCloud inspection on 24 September 2026 found no servers, private disks or allocated IPs. Helsinki Starter 2 CPU/4 GB and the stopped `CLOUDNATIVE-1xCPU-4GB` retention plan are available. Promotional credits expire at 2026-10-24 09:19:55 UTC; recheck before deployment. No resources have been created for this run.
+The 24 September 2026 attempt deployed an encrypted Helsinki control server, applied all four migrations, and verified public HTTPS and model access. Browser access was denied because Codex could not verify its admin-enforced browser policy. No customer journey was started. Cleanup returned the cloud inventory to empty and disabled the test webhook. See [the attempt report](CUSTOMER-JOURNEY-2026-09-24.md) for evidence and outstanding checks. Recheck promotional-credit expiry before another deployment.
 
 ## Configuration
 
-Use a private ignored environment file. Required external credentials are `STRIPE_SECRET_KEY` (test), `OPENAI_API_KEY`, and `RESEND_API_KEY`; `TEST_ACCOUNT_EMAIL` is the existing Stripe account email and must also be the Resend account email when using `onboarding@resend.dev`. Never include their values in evidence. Configure Resend via `SMTP_URL` with TLS at `smtp.resend.com:465`, username `resend`, and the API key as password, percent-encoding credentials.
+Use a private ignored environment file. Required external credentials are `STRIPE_SECRET_KEY` (test), `OPENAI_API_KEY`, and the Resend API key (saved as `RESEND_SMTP_PASSWORD` for this run). `TEST_ACCOUNT_EMAIL` must be the address registered with Resend when using `onboarding@resend.dev`; use that same inbox for the Stripe test customer. Stripe's account API did not return an account email in this run, so do not infer one. Never include credential values in evidence. Configure Resend via `SMTP_URL` with TLS at `smtp.resend.com:465`, username `resend`, and the API key as password, percent-encoding credentials.
 
 For the temporary deployment set:
 
@@ -32,7 +32,7 @@ Use one control VM and one tenant VM at a time. Run BYOK first, save evidence an
 
 | Check | Required evidence | Current result |
 | --- | --- | --- |
-| Signup and email | Delivered inbox message, selected mode retained, confirmed single-use link | Pending credentials/setup |
+| Signup and email | Delivered inbox message, selected mode retained, confirmed single-use link | Pending browser access; credentials configured |
 | Hosting checkout | Browser completion, paid invoice, signed event, durable worker job | Pending |
 | Tenant provisioning | One VM, fresh provider encryption evidence, HTTPS, setup-ready portal | Pending |
 | Browser onboarding | Wizard, gateway connection, session-bound pairing, no operator repair | Pending |
