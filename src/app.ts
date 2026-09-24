@@ -6,7 +6,12 @@ import { resolve } from "node:path";
 import { isIP } from "node:net";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { type Config, type Model, launchGate } from "./config.js";
+import {
+  type Config,
+  type Model,
+  launchGate,
+  checkoutAvailable,
+} from "./config.js";
 import { type DB, transaction, audit } from "./db.js";
 import { auth, identity } from "./auth.js";
 import { hash, seal, unseal, token, handoff } from "./crypto.js";
@@ -127,8 +132,9 @@ export async function buildApp(
   app.get("/api/catalog", async () => ({
     hostingMonthlyCents: 2500,
     creditTopupCents: 1000,
-    checkoutEnabled: c.CHECKOUT_ENABLED,
-    creditsEnabled: c.CREDITS_ENABLED,
+    checkoutEnabled: checkoutAvailable(c),
+    creditsEnabled:
+      checkoutAvailable(c, true) && catalog.some((m) => m.verified),
     billingMode: c.BILLING_MODE,
     models: catalog
       .filter((m) => m.verified)
@@ -192,14 +198,15 @@ export async function buildApp(
         throw Object.assign(Error("ALREADY_SUBSCRIBED"), { statusCode: 409 });
       if (!tenant) {
         await tx.query("SELECT pg_advisory_xact_lock(582200)");
-        const count = Number(
-          (
-            await tx.query(
-              "SELECT count(*) FROM tenants WHERE state<>'deleted'",
-            )
-          ).rows[0].count,
-        );
-        if (count >= c.MAX_TENANTS)
+        // Paid founders keep their place after cancellation/deletion. Unpaid
+        // reservations count only until maintenance expires the abandoned tenant.
+        const cohort = (
+          await tx.query(
+            "SELECT count(DISTINCT account_id) AS count, bool_or(account_id=$1) AS returning FROM tenants WHERE state<>'deleted' OR EXISTS(SELECT 1 FROM orders WHERE tenant_id=tenants.id AND kind='hosting' AND state='paid')",
+            [who.accountId],
+          )
+        ).rows[0];
+        if (!cohort.returning && Number(cohort.count) >= c.MAX_TENANTS)
           throw Object.assign(Error("COHORT_FULL"), { statusCode: 409 });
         const id = randomUUID();
         tenant = (
@@ -344,7 +351,13 @@ export async function buildApp(
   }
   app.post("/api/tenants/:id/access", async (req) => {
     const t = await owned(req);
-    if (!["awaiting_setup", "ready"].includes(t.state))
+    if (
+      !["awaiting_setup", "ready"].includes(t.state) ||
+      !(
+        new Date(t.paid_until).getTime() > Date.now() ||
+        new Date(t.grace_until).getTime() > Date.now()
+      )
+    )
       throw Object.assign(Error("AGENT_NOT_READY"), { statusCode: 409 });
     await audit(db, t.account_id, t.id, "access");
     return {
