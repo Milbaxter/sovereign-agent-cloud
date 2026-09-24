@@ -105,6 +105,7 @@ test("live checkout stays blocked until security evidence is recorded", async ()
   const evidence = Object.fromEntries(
     [
       "paidProvisioning",
+      "storageEncryption",
       "byokOnboarding",
       "creditOnboarding",
       "channels",

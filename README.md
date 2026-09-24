@@ -14,6 +14,12 @@ A small control service for paid, dedicated UpCloud VMs running **unmodified Ope
 
 The marketing website is included at **`/welcome/`**, with the existing account portal at **`/`**. Its purchase link passes the selected inference mode to the portal; verified email access and server-bound Checkout Sessions remain the only purchase path. Read [the website handoff](docs/WEBSITE-INTEGRATION.md) and [launch materials](docs/marketing/README.md). Stripe products still need configuration; the previous standalone Payment Link suggestion is superseded.
 
+## Personal knowledge direction
+
+The next product layer is a personal knowledge base users can inspect, correct, scope, delete, and take to another provider. **See what it knows. Change it. Take it with you.** The [design and implementation sequence](docs/PERSONAL-KNOWLEDGE.md) defines readable canonical files, provenance, knowledge-only export/import, deletion, and a future private-vault option. These are planned capabilities, separate from the existing complete-state export.
+
+The [privacy and security claims policy](docs/PRIVACY-SECURITY.md) records administrator access, model/embedding destinations, key custody, and evidence required before making customer promises. Current managed hosting is not zero knowledge.
+
 ## Local development
 
 Requires Node 24+, Docker, and PostgreSQL 17. No cloud credentials are required for the integration suite; it uses local PostgreSQL and fake payment/cloud adapters.

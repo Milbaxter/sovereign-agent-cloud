@@ -24,6 +24,18 @@ Run `docker compose up --build -d`. Migrations run before the API and worker. Mo
 
 ## Access and privacy
 
+### Disk encryption and launch evidence
+
+Tenant creation explicitly sends `encrypted: "yes"` for the cloned root disk. Provisioning then reads fresh server details and requires `storage_encrypted: "yes"` on every disk before publishing DNS or enabling customer setup. Missing/negative evidence raises `PROVIDER_STORAGE_ENCRYPTION_UNVERIFIED`; recorded VM/disk IDs remain available for reconciliation and cleanup, and retries do not create a replacement VM. This check is a provisioning gate, not continuous monitoring of later owner/admin changes.
+
+Before marking `storageEncryption` in `release-evidence.json` passed, record actual provider responses for a newly created test tenant and inventory all existing tenant and control-service disks. Include disk IDs, zone, encryption status, date, and reviewer without copying credentials or customer content into evidence. Verify encrypted backup recovery and the actual backup endpoint/location independently. The SDK's region setting alone does not prove residency. Mocked responses and a passing build do not satisfy this gate.
+
+An existing unencrypted disk is not retroactively fixed by this code. UpCloud requires creating an encrypted clone; plan a backed-up maintenance/cutover, verify the replacement, and follow retention policy for old copies. Do not delete or recreate a customer's VM automatically to satisfy the gate. If encryption evidence is missing during provider maintenance, inspect the provider state and retry; do not bypass the assertion.
+
+UpCloud manages block-storage encryption keys. Operator root access and the running application can still read data. Encrypted disks protect stored media; they do not make this service zero knowledge or encrypt content from a selected inference provider. See [UpCloud's encryption documentation](https://upcloud.com/docs/products/block-storage/encryption-at-rest/) and [server API fields](https://developers.upcloud.com/1.3/8-servers/).
+
+### Customer and operator access
+
 Email sign-in links are hashed, expire in 15 minutes, and are consumed only after a browser confirmation. Account sessions last seven days. The portal offers a fresh sign-in link without signing out; email links preserve the selected inference mode. Secret export, SSH changes, and cancellation require a login less than ten minutes old. Tenant access tickets expire in 60 seconds and are single-use; tenant sessions last one hour.
 
 The browser terminal exposes only the upstream wizard, not an unauthenticated root shell. The authenticated tenant management service has access to that tenant's Docker socket to perform maintenance; it is part of the trusted computing base. It does not have the UpCloud account token. Owner-authorized SSH keys grant root privileges to the owner's isolated VM from the explicit IPv4 address supplied with the key. The address is persisted as a /32 firewall rule.

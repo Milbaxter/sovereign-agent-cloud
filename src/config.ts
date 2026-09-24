@@ -101,6 +101,7 @@ export function launchGate(c: Config, credits = false) {
     for (const name of [
       "productionSecurity",
       "paidProvisioning",
+      "storageEncryption",
       "byokOnboarding",
       "creditOnboarding",
       "channels",

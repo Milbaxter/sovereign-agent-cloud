@@ -3,7 +3,11 @@ import { readFile } from "node:fs/promises";
 import { transaction, type DB, incident } from "./db.js";
 import { hash, token, seal, unseal } from "./crypto.js";
 import type { Config, Model } from "./config.js";
-import { UpCloud, createRejected } from "./providers/upcloud.js";
+import {
+  UpCloud,
+  createRejected,
+  assertEncryptedStorage,
+} from "./providers/upcloud.js";
 import { DNS } from "./providers/dns.js";
 export function imagePin(image: string) {
   return /^ghcr\.io\/[a-z0-9/._-]+:[a-zA-Z0-9._-]+@sha256:[a-f0-9]{64}$/.test(
@@ -167,6 +171,9 @@ export class Provisioner {
         "UPDATE tenants SET provider_id=$2,ip=$3,disk_ids=$4 WHERE id=$1",
         [id, remote.uuid, ip ?? null, JSON.stringify(disks)],
       );
+      // Retain resource IDs for reconciliation/cleanup even when verification fails.
+      // Check both newly created and adopted VMs before DNS or customer setup.
+      assertEncryptedStorage(remote);
       if (!ip) throw Error("WAITING_FOR_PUBLIC_IP");
       const dnsId = await this.dns.ensure(t.hostname, ip);
       await conn.query("UPDATE tenants SET dns_id=$2 WHERE id=$1", [id, dnsId]);
