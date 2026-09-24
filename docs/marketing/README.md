@@ -13,7 +13,8 @@ The landing page lives in `public/welcome/` and is served at `/welcome/` by the 
 
 ## What is included
 
-- `campaign.md`: founder post, short posts, independence message, comparison replies, directory description.
+- `brand.md`: freedom positioning, voice, logo, colour, type and imagery.
+- `campaign.md`: founder post, short posts, freedom post, independence message, comparison replies, directory description.
 - `recording-scripts.md`: real-product recording storyboard and three short clips.
 - `outreach.md`: ten researched creators/publications, with pitch and follow-up drafts.
 - `launch-calendar.md`: four-week sequence, interviews, and customer-example template.
@@ -34,6 +35,6 @@ Release acceptance remains governed by `docs/VALIDATION.md` and `release-evidenc
 
 ## Assets and portability
 
-The HTML, CSS, JavaScript, and images are local; no remote fonts, advertising pixels, or third-party scripts are added. `nordic-coast.jpg` is an AI-generated illustrative landscape, not a verified picture of the data center or a particular Finnish location. The favicon is a local SVG so it works under the backend's existing Content Security Policy.
+The HTML, CSS, JavaScript, fonts and images are local; no remote fonts, advertising pixels, or third-party scripts are added. Fraunces and Inter are bundled under the SIL Open Font License (`public/welcome/fonts/`). `nordic-coast.jpg` (and its WebP crops `nordic-coast.webp`, `nordic-horizon.webp`, `nordic-pine.webp`) is an AI-generated illustrative landscape, not a verified picture of the data center or a particular Finnish location; the FAQ says so. The logo and favicon are local SVGs so they work under the backend's existing Content Security Policy, and `og-image.jpg` is the social share card. See the [brand guide](brand.md) for positioning, voice, logo, colour and type.
 
 Edit the repository copy as the integration source of truth. Keep personal deployment logs, Sites metadata, credentials, and launch ZIPs out of the public repository.

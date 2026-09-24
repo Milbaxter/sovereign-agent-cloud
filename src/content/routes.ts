@@ -15,6 +15,10 @@ const escape = (value: string) =>
 const jsonLd = (data: object) =>
   `<script type="application/ld+json">${JSON.stringify(data).replace(/</g, "\\u003c")}</script>`;
 
+const shareImage = "/welcome/og-image.jpg";
+const brand = (href: string) =>
+  `<a href="${href}" class="brand" aria-label="Your Agent home"><img class="brand-mark" src="/welcome/logo-mark.svg" alt="" width="36" height="36"><span class="brand-word">your agent<span class="brand-period">.</span></span></a>`;
+
 export function contentRoutes(app: FastifyInstance, c: Config) {
   // Configured origin only: request Host and forwarded headers cannot poison canonicals.
   const origin = new URL(c.PUBLIC_ORIGIN).origin;
@@ -38,7 +42,11 @@ export function contentRoutes(app: FastifyInstance, c: Config) {
     <meta property="og:type" content="${type}">
     <meta property="og:title" content="${escape(title)}">
     <meta property="og:description" content="${escape(description)}">
-    <meta name="twitter:card" content="summary">
+    <meta property="og:image" content="${escape(origin + shareImage)}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:image" content="${escape(origin + shareImage)}">
     <meta name="twitter:title" content="${escape(title)}">
     <meta name="twitter:description" content="${escape(description)}">`;
   const cards = (items: typeof articles) =>
@@ -60,13 +68,13 @@ export function contentRoutes(app: FastifyInstance, c: Config) {
   ) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)} | Your Agent</title><meta name="description" content="${escape(description)}">
-<meta name="theme-color" content="#184be8">${metadata(path, title, description, article ? "article" : "website")}
+<meta name="theme-color" content="#0d1f52">${metadata(path, title, description, article ? "article" : "website")}
 <link rel="icon" type="image/svg+xml" href="/welcome/favicon.svg"><link rel="stylesheet" href="/welcome/styles.css"><link rel="stylesheet" href="/welcome/reading.css">${jsonLd(structured)}</head>
 <body class="reading-page"><a class="skip-link" href="#main">Skip to content</a>
-<header class="site-header wrap"><a href="/welcome/" class="brand" aria-label="Your Agent home"><span class="brand-mark" aria-hidden="true">[&nbsp;]</span> your agent<span class="brand-period">.</span></a>
+<header class="site-header wrap">${brand("/welcome/")}
 <nav aria-label="Main navigation"><a href="/welcome/blog/">Journal</a><a href="/welcome/compare/">Alternatives</a><a href="/welcome/#pricing">Pricing</a></nav><a class="button button-small" href="/welcome/">Explore Your Agent ↗</a></header>
 <main id="main" class="wrap reading-main">${body}</main>
-<footer class="wrap site-footer"><p>Make it personal. Keep it yours.</p><a href="/welcome/blog/">Journal</a><a href="/welcome/compare/">Alternatives</a><a href="https://github.com/Milbaxter/sovereign-agent-cloud">Source on GitHub ↗</a></footer></body></html>`;
+<footer class="site-footer"><div class="wrap footer-inner"><div class="footer-brand">${brand("/welcome/")}<p>Make it personal. Keep it yours.</p></div><nav class="footer-links" aria-label="Footer"><a href="/welcome/#freedom">Freedom</a><a href="/welcome/blog/">Journal</a><a href="/welcome/compare/">Alternatives</a><a href="/welcome/#pricing">Pricing</a><a href="https://github.com/Milbaxter/sovereign-agent-cloud">Source on GitHub ↗</a></nav></div></footer></body></html>`;
   const breadcrumbs = (path: string, section: string, title?: string) => {
     const trail = [
       {
@@ -109,7 +117,7 @@ export function contentRoutes(app: FastifyInstance, c: Config) {
     .replace(/\s*<meta\s+name="robots"[^>]*>/, "")
     .replace(
       "</head>",
-      `<meta name="robots" content="${robots}"><link rel="canonical" href="${escape(origin + "/welcome/")}"><meta property="og:url" content="${escape(origin + "/welcome/")}"></head>`,
+      `<meta name="robots" content="${robots}"><link rel="canonical" href="${escape(origin + "/welcome/")}"><meta property="og:url" content="${escape(origin + "/welcome/")}"><meta property="og:image" content="${escape(origin + shareImage)}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${escape(origin + shareImage)}"></head>`,
     );
   sendPage("/welcome/", home);
 
@@ -164,7 +172,7 @@ export function contentRoutes(app: FastifyInstance, c: Config) {
     const body = `<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/welcome/">Your Agent</a> / <a href="/welcome/${a.section}/">${label}</a> / <span>${escape(a.title)}</span></nav>
 <article class="reading-article"><header><p class="eyebrow">${label.toUpperCase()} · OWN YOUR AI</p><h1>${escape(a.title)}</h1><p class="byline">By Your Agent · Published and reviewed <time datetime="${reviewedAt}">24 September 2026</time></p><p class="direct-answer">${escape(a.answer)}</p></header>
 <div class="article-body">${a.body}</div></article>
-<aside class="reading-cta"><p class="eyebrow">MAKE IT PERSONAL. KEEP IT YOURS.</p><h2>Meet the project behind the journal.</h2><p>Explore Your Agent’s approach, planned hosting offer and current release status.</p><a class="button" href="/welcome/#ownership">Explore Your Agent ↗</a></aside>
+<aside class="reading-cta"><p class="eyebrow">Make it personal. Keep it yours.</p><h2>Freedom is the feature.</h2><p>Your Agent is an open-source personal agent with your choice of model and a context built to travel. See what’s built, what’s next and what it costs.</p><a class="button" href="/welcome/#freedom">Explore Your Agent ↗</a></aside>
 <section class="related-reading" aria-label="Related reading"><h2>Keep reading</h2>${cards(a.related.map((slug) => articles.find((item) => item.slug === slug)!))}</section>`;
     sendPage(
       path,
