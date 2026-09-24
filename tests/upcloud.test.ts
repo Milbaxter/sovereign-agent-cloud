@@ -1,10 +1,163 @@
-import { test } from "node:test";
-import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UpCloud, assertEncryptedStorage } from "../src/providers/upcloud.js";
 import { launchGate, type Config } from "../src/config.js";
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  UpCloud,
+  assertEncryptedStorage,
+  createRejected,
+  type UpCloudConfig,
+} from "../src/providers/upcloud.js";
+
+const config: UpCloudConfig = {
+  UPCLOUD_TOKEN: "test-secret",
+  UPCLOUD_ZONE: "fi-hel1",
+  UPCLOUD_PLAN: "selected-plan",
+  UPCLOUD_TEMPLATE: "selected-template",
+  ADMIN_SSH_PUBLIC_KEY: "ssh-ed25519 test-key",
+  BILLING_MODE: "test",
+};
+const json = (value: unknown, status = 200) =>
+  new Response(JSON.stringify(value), { status });
+
+test("cloud-init creation enables metadata and passes the bootstrap script and SSH key", async () => {
+  const cloud = new UpCloud(config, async (url, init) => {
+    assert.equal(url, "https://api.upcloud.com/1.3/server");
+    assert.equal(init?.method, "POST");
+    assert.equal(
+      new Headers(init?.headers).get("authorization"),
+      "Bearer test-secret",
+    );
+    const { server } = JSON.parse(String(init?.body));
+    assert.equal(server.metadata, "yes");
+    assert.equal(server.firewall, "on");
+    assert.equal(server.zone, "fi-hel1");
+    assert.equal(server.user_data, "#!/bin/bash\ntouch /root/booted");
+    assert.equal(server.login_user.create_password, "no");
+    assert.deepEqual(server.login_user.ssh_keys.ssh_key, [
+      config.ADMIN_SSH_PUBLIC_KEY,
+    ]);
+    assert.deepEqual(
+      server.networking.interfaces.interface.map((i: any) => i.type),
+      ["public"],
+    );
+    return json({ server: { uuid: "created-vm" } }, 202);
+  });
+  assert.equal(
+    (
+      await cloud.create(
+        "tenant.example",
+        "tenant-id",
+        "#!/bin/bash\ntouch /root/booted",
+      )
+    ).uuid,
+    "created-vm",
+  );
+});
+
+test("provider error codes survive without exposing error descriptions or inputs", async () => {
+  const cloud = new UpCloud(config, async () =>
+    json(
+      {
+        error: {
+          error_code: "METADATA_DISABLED_ON_CLOUD-INIT",
+          error_message: "secret echoed input: test-secret",
+        },
+      },
+      409,
+    ),
+  );
+  await assert.rejects(
+    cloud.create("tenant.example", "tenant", "private-userdata"),
+    (error: any) => {
+      assert.equal(
+        error.message,
+        "UPCLOUD_409_METADATA_DISABLED_ON_CLOUD_INIT",
+      );
+      assert.equal(error.status, 409);
+      assert.equal(createRejected(error), true);
+      assert.ok(!JSON.stringify(error).includes("test-secret"));
+      return true;
+    },
+  );
+});
+
+test("non-JSON and untrusted error codes remain safe status-only failures", async () => {
+  for (const response of [
+    new Response("proxy failure with private input", { status: 502 }),
+    json({ error: { error_code: "secret echoed input" } }, 502),
+  ]) {
+    const cloud = new UpCloud(config, async () => response);
+    await assert.rejects(cloud.call("/account"), (error: any) => {
+      assert.equal(error.message, "UPCLOUD_502");
+      assert.equal(createRejected(error), false);
+      return true;
+    });
+  }
+});
+
+test("transport errors and timeouts cannot trigger a second create", () => {
+  for (const status of [undefined, 408, 500, 502, 503, 504])
+    assert.equal(createRejected({ status }), false);
+  for (const status of [400, 401, 402, 403, 404, 409, 422, 429])
+    assert.equal(createRejected({ status }), true);
+});
+
+test("missing token fails before any network request", async () => {
+  const cloud = new UpCloud({ ...config, UPCLOUD_TOKEN: "" }, async () => {
+    assert.fail("must not contact the provider");
+  });
+  await assert.rejects(cloud.call("/account"), /UPCLOUD_TOKEN_REQUIRED/);
+});
+
+test("inventory reads later pages and refuses malformed inventory", async () => {
+  const cloud = new UpCloud(config, async (url) => {
+    const offset = Number(new URL(String(url)).searchParams.get("offset"));
+    return json({
+      servers: {
+        server:
+          offset === 0
+            ? Array.from({ length: 100 }, (_, i) => ({
+                uuid: String(i),
+                hostname: `other-${i}`,
+              }))
+            : [{ uuid: "target", hostname: "tenant.example" }],
+      },
+    });
+  });
+  assert.equal((await cloud.find("tenant.example")).uuid, "target");
+  const malformed = new UpCloud(config, async () => json({}));
+  await assert.rejects(
+    malformed.find("tenant.example"),
+    /UPCLOUD_INVALID_INVENTORY/,
+  );
+});
+
+test("deletion waits for stop and retries disk cleanup after VM is already gone", async () => {
+  const calls: string[] = [];
+  let exists = true;
+  const cloud = new UpCloud(config, async (url, init) => {
+    const path = new URL(String(url)).pathname.replace("/1.3", "");
+    calls.push(`${init?.method} ${path}`);
+    if (path === "/server/vm" && init?.method === "GET")
+      return exists
+        ? json({ server: { state: "started" } })
+        : json({ error: { error_code: "SERVER_NOT_FOUND" } }, 404);
+    if (path.endsWith("/stop"))
+      return json({ server: { state: "maintenance" } }, 202);
+    assert.equal(path, "/storage/disk");
+    assert.equal(init?.method, "DELETE");
+    return new Response(null, { status: 204 });
+  });
+  await assert.rejects(cloud.destroy("vm", ["disk"]), /WAITING_FOR_STOP/);
+  assert.ok(!calls.some((c) => c.startsWith("DELETE")));
+  exists = false;
+  await cloud.destroy("vm", ["disk"]);
+  assert.equal(calls.at(-1), "DELETE /storage/disk");
+});
 
 test("server creation explicitly requests encryption of the cloned root disk", async (t) => {
   let request: any;

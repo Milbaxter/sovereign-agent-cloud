@@ -3,7 +3,11 @@ import { readFile } from "node:fs/promises";
 import { transaction, type DB, incident } from "./db.js";
 import { hash, token, seal, unseal } from "./crypto.js";
 import type { Config, Model } from "./config.js";
-import { UpCloud, assertEncryptedStorage } from "./providers/upcloud.js";
+import {
+  UpCloud,
+  createRejected,
+  assertEncryptedStorage,
+} from "./providers/upcloud.js";
 import { DNS } from "./providers/dns.js";
 export function imagePin(image: string) {
   return /^ghcr\.io\/[a-z0-9/._-]+:[a-zA-Z0-9._-]+@sha256:[a-f0-9]{64}$/.test(
@@ -74,6 +78,7 @@ export class Provisioner {
       )
         throw Error("PINNED_IMAGES_REQUIRED");
       if (
+        !this.c.UPCLOUD_TOKEN ||
         !this.c.UPCLOUD_PLAN ||
         !this.c.UPCLOUD_TEMPLATE ||
         !this.c.ADMIN_CIDR ||
@@ -145,9 +150,9 @@ export class Provisioner {
             userdata.replace("# BOOTSTRAP_VARIABLES", header),
           );
         } catch (e: any) {
-          if ([400, 401, 403, 422].includes(e.status))
+          if (createRejected(e))
             await conn.query(
-              "UPDATE tenants SET create_attempted_at=NULL,bootstrap_hash=NULL,bundle_cipher=NULL WHERE id=$1",
+              "UPDATE tenants SET create_attempted_at=NULL,bootstrap_hash=NULL,bootstrap_expires_at=NULL,bundle_cipher=NULL,inference_key_hash=NULL,inference_key_cipher=NULL WHERE id=$1",
               [id],
             );
           throw e;
