@@ -13,11 +13,14 @@ unset BOOTSTRAP_TOKEN
 image=$(jq -r .tenantImage /opt/sac/bundle.json)
 docker pull "$image"
 docker run --rm --network none -v /:/host "$image" node dist/tenant/bootstrap.js /host/opt/sac/bundle.json
+# Install metadata/private-network egress rules before starting tenant workloads.
+systemctl daemon-reload
+systemctl enable --now sac-firewall.service
 docker compose --env-file /opt/sac/openclaw.env -f /opt/sac/compose.yml up -d
 docker exec sac-access /app/deploy/configure-browser.sh
 sysctl --system >/dev/null
 systemctl daemon-reload
-systemctl enable --now sac-firewall.service sac-terminal.service
+systemctl enable --now sac-terminal.service
 systemctl reload ssh
 systemctl restart caddy
 touch /var/lib/sac/bootstrap-complete

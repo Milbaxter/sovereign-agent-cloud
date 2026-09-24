@@ -1,8 +1,28 @@
 import type { Config } from "../config.js";
+export type UpCloudConfig = Pick<
+  Config,
+  | "UPCLOUD_TOKEN"
+  | "UPCLOUD_ZONE"
+  | "UPCLOUD_PLAN"
+  | "UPCLOUD_TEMPLATE"
+  | "ADMIN_SSH_PUBLIC_KEY"
+  | "BILLING_MODE"
+>;
+
+// Explicit provider rejections are safe to retry after correcting configuration.
+// Timeouts, transport failures and 5xx responses remain ambiguous.
+export function createRejected(error: { status?: number }) {
+  return [400, 401, 402, 403, 404, 409, 422, 429].includes(error.status ?? 0);
+}
+
 export class UpCloud {
-  constructor(readonly c: Config) {}
+  constructor(
+    readonly c: UpCloudConfig,
+    readonly request: typeof fetch = fetch,
+  ) {}
   async call(path: string, method = "GET", body?: unknown): Promise<any> {
-    const res = await fetch(`https://api.upcloud.com/1.3${path}`, {
+    if (!this.c.UPCLOUD_TOKEN.trim()) throw Error("UPCLOUD_TOKEN_REQUIRED");
+    const res = await this.request(`https://api.upcloud.com/1.3${path}`, {
       method,
       headers: {
         authorization: `Bearer ${this.c.UPCLOUD_TOKEN}`,
@@ -11,17 +31,30 @@ export class UpCloud {
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(30_000),
     });
-    if (!res.ok)
-      throw Object.assign(Error(`UPCLOUD_${res.status}`), {
-        status: res.status,
-      });
+    if (!res.ok) {
+      const data: any = await res.json().catch(() => null);
+      const rawCode = data?.error?.error_code;
+      // Never propagate descriptions or response bodies: they can echo inputs.
+      const errorCode =
+        typeof rawCode === "string" && /^[A-Z0-9_-]{1,100}$/.test(rawCode)
+          ? rawCode.replaceAll("-", "_")
+          : undefined;
+      throw Object.assign(
+        Error(`UPCLOUD_${res.status}${errorCode ? `_${errorCode}` : ""}`),
+        {
+          status: res.status,
+          errorCode,
+        },
+      );
+    }
     return res.status === 204 ? null : res.json();
   }
   async list() {
     const all: any[] = [];
     for (let offset = 0; ; offset += 100) {
       const result = await this.call(`/server?limit=100&offset=${offset}`),
-        rows = result.servers?.server ?? [];
+        rows = result.servers?.server;
+      if (!Array.isArray(rows)) throw Error("UPCLOUD_INVALID_INVENTORY");
       all.push(...rows);
       if (rows.length < 100) break;
       if (offset > 10000) throw Error("UPCLOUD_PAGINATION_LIMIT");
@@ -41,7 +74,9 @@ export class UpCloud {
           plan: this.c.UPCLOUD_PLAN,
           title: `sac-${this.c.BILLING_MODE}-${tenantId}`,
           hostname,
-          metadata: "no",
+          // Required by UpCloud cloud-init templates. Tenant container egress to
+          // the link-local metadata endpoint is blocked by the host firewall.
+          metadata: "yes",
           firewall: "off",
           login_user: {
             username: "root",

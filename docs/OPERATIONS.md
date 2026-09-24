@@ -2,6 +2,12 @@
 
 ## Deployment
 
+Start with `npm ci && npm run upcloud:inspect` to check the account without creating resources. It reads `UPCLOUD_TOKEN` from the environment/ignored `.env`, or from `~/.config/upcloud-agent/credentials.env`. The latter file should contain `UPCLOUD_TOKEN=...` and be readable only by you (`chmod 600`). Create the token under UpCloud Account → API Tokens; the automation does not need permission to create more tokens. Never paste tokens into chat, logs, or commits.
+
+The inspection command only calls the account, plan, template, zone and pricing APIs. It reports current credits, Finnish-zone pricing, 2-core/4GB plans, and public Ubuntu 24.04 cloud-init templates. Check promotional credit expiry in the account separately; a positive balance does not establish expiry. Choose the actual plan/template from this output before deploying. UpCloud access alone does not complete the product setup: the full test also needs the control VM, portal/tenant DNS with Cloudflare access, a publicly pullable pinned tenant image, SMTP, Stripe test configuration, and backup storage.
+
+Cloud-init templates require `metadata=yes`. The host firewall blocks tenant containers from accessing metadata and private address ranges before workloads start. Explicit API rejections clear the create attempt for retry; network errors and server-side failures retain the reconciliation guard to prevent duplicate VMs. Provider errors expose only a sanitized error code, never the full response or bootstrap inputs.
+
 Use a separate Finnish UpCloud VM for control services. Set a domain and DNS A record for the portal. Restrict its SSH, keep PostgreSQL unpublished, enable host firewall rules for 80/443, and retain operator access only through an administrative network. Docker Compose supplies local PostgreSQL, API, worker, migration job, and Caddy.
 
 Run `node scripts/init-secrets.mjs` once. Edit ignored `.env`; never paste keys into issues or commits. Generate the backup age identity offline with `age-keygen`; put only its public recipient in `.env`. Store private identity, database backups, and the encryption key separately. Losing those keys prevents recovery.
