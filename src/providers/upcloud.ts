@@ -15,6 +15,25 @@ export function createRejected(error: { status?: number }) {
   return [400, 401, 402, 403, 404, 409, 422, 429].includes(error.status ?? 0);
 }
 
+// Server detail responses use storage_encrypted, not the create field encrypted.
+// This service provisions only disk devices; missing or unknown evidence fails closed.
+export function assertEncryptedStorage(server: any) {
+  const devices = server.storage_devices?.storage_device;
+  if (
+    !Array.isArray(devices) ||
+    devices.length === 0 ||
+    devices.some(
+      (device: any) =>
+        !device ||
+        device.type !== "disk" ||
+        typeof device.storage !== "string" ||
+        !device.storage.trim() ||
+        device.storage_encrypted !== "yes",
+    )
+  )
+    throw Error("PROVIDER_STORAGE_ENCRYPTION_UNVERIFIED");
+}
+
 export class UpCloud {
   constructor(
     readonly c: UpCloudConfig,
@@ -98,6 +117,7 @@ export class UpCloud {
             storage_device: [
               {
                 action: "clone",
+                encrypted: "yes",
                 storage: this.c.UPCLOUD_TEMPLATE,
                 size: 30,
                 tier: "standard",

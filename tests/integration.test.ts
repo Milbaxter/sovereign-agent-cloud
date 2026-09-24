@@ -460,7 +460,11 @@ test("provider, single-use bootstrap, DNS and health retry reach owner setup", a
         { access: "public", family: "IPv4", address: "203.0.113.2" },
       ],
     },
-    storage_devices: { storage_device: [{ storage: "disk-e2e" }] },
+    storage_devices: {
+      storage_device: [
+        { storage: "disk-e2e", type: "disk", storage_encrypted: "yes" },
+      ],
+    },
   };
   const cloud = new UpCloud(
     { ...c, UPCLOUD_TOKEN: "test-token" },
@@ -555,7 +559,11 @@ test("provider retry finds VM after response loss without creating again", async
       uuid: "vm1",
       hostname,
       ip_addresses: { ip_address: [] },
-      storage_devices: { storage_device: [{ storage: "disk1" }] },
+      storage_devices: {
+        storage_device: [
+          { storage: "disk1", type: "disk", storage_encrypted: "yes" },
+        ],
+      },
     }),
     create: async () => {
       creates++;
@@ -584,6 +592,79 @@ test("live checkout cannot be enabled without acceptance evidence", () => {
     /EVIDENCE/,
   );
 });
+
+for (const adopted of [false, true]) {
+  for (const encrypted of ["yes", "no", undefined]) {
+    test(`${adopted ? "adopted" : "new"} VM with encryption ${encrypted} is verified before DNS and setup`, async (t) => {
+      await db.query(
+        "UPDATE tenants SET mode='byok',state='provisioning' WHERE id=$1",
+        [tenant],
+      );
+      const hostname = (await db.query("SELECT hostname FROM tenants")).rows[0]
+        .hostname;
+      let creates = 0;
+      let dnsCalls = 0;
+      let healthCalls = 0;
+      t.mock.method(globalThis, "fetch", async (url: string) => {
+        assert.equal(url, `https://${hostname}/internal/status`);
+        healthCalls++;
+        return Response.json({ installed: true });
+      });
+      const cloud = {
+        find: async () => (adopted ? { uuid: "vm1" } : null),
+        create: async () => {
+          creates++;
+          return { uuid: "vm1" };
+        },
+        details: async () => ({
+          uuid: "vm1",
+          hostname,
+          ip_addresses: {
+            ip_address: [
+              { access: "public", family: "IPv4", address: "203.0.113.2" },
+            ],
+          },
+          storage_devices: {
+            storage_device: [
+              { storage: "disk1", type: "disk", storage_encrypted: encrypted },
+            ],
+          },
+        }),
+      };
+      const dns = {
+        ensure: async () => {
+          dnsCalls++;
+          return "dns1";
+        },
+      };
+      const provisioner = new Provisioner(db, c, [], cloud as any, dns as any);
+      if (encrypted === "yes") await provisioner.provision(tenant);
+      else {
+        await assert.rejects(
+          provisioner.provision(tenant),
+          /PROVIDER_STORAGE_ENCRYPTION_UNVERIFIED/,
+        );
+        // Retried provisioning adopts the recorded VM and never creates a second one.
+        await assert.rejects(
+          provisioner.provision(tenant),
+          /PROVIDER_STORAGE_ENCRYPTION_UNVERIFIED/,
+        );
+      }
+      const row = (
+        await db.query("SELECT * FROM tenants WHERE id=$1", [tenant])
+      ).rows[0];
+      assert.equal(row.provider_id, "vm1");
+      assert.deepEqual(row.disk_ids, ["disk1"]);
+      assert.equal(creates, adopted ? 0 : 1);
+      assert.equal(dnsCalls, encrypted === "yes" ? 1 : 0);
+      assert.equal(healthCalls, encrypted === "yes" ? 1 : 0);
+      assert.equal(
+        row.state,
+        encrypted === "yes" ? "awaiting_setup" : "provisioning",
+      );
+    });
+  }
+}
 
 test("email verification tokens are single-use and sessions contain only hashes", async () => {
   const secret = token();
