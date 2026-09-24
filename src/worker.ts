@@ -82,10 +82,15 @@ export class Worker {
   async handle(kind: string, p: any) {
     if (kind === "stripe") return this.billing.handle(p.type, p.id);
     if (kind === "provision") return this.provisioner.provision(p.tenantId);
-    const t = (
+    let t = (
       await this.db.query("SELECT * FROM tenants WHERE id=$1", [p.tenantId])
     ).rows[0];
     if (!t || t.state === "deleted") return;
+    if (["suspend", "delete"].includes(kind) && t.subscription_id) {
+      await this.billing.subscription(t.subscription_id);
+      t = (await this.db.query("SELECT * FROM tenants WHERE id=$1", [t.id]))
+        .rows[0];
+    }
     if (kind === "backup") return this.backups.take(t);
     if (kind === "suspend") {
       if (
@@ -193,7 +198,49 @@ export class Worker {
       )
     ).rows;
     const date = new Date().toISOString().slice(0, 10);
-    for (const t of tenants) {
+    if (this.c.UPCLOUD_TOKEN) {
+      try {
+        for (const remote of await this.provisioner.cloud.list()) {
+          if (!String(remote.title).startsWith(`sac-${this.c.BILLING_MODE}-`))
+            continue;
+          const known = tenants.some(
+            (t) =>
+              t.provider_id === remote.uuid || t.hostname === remote.hostname,
+          );
+          if (!known)
+            await incident(
+              this.db,
+              `orphan:${remote.uuid}`,
+              "orphaned_provider_vm",
+              null,
+              { providerId: remote.uuid },
+            );
+        }
+      } catch {
+        await incident(
+          this.db,
+          `inventory:${date}`,
+          "provider_inventory_failed",
+        );
+      }
+    }
+    for (const original of tenants) {
+      let t = original;
+      if (t.subscription_id) {
+        try {
+          await this.billing.subscription(t.subscription_id);
+          t = (await this.db.query("SELECT * FROM tenants WHERE id=$1", [t.id]))
+            .rows[0];
+        } catch {
+          await incident(
+            this.db,
+            `billing-sync:${t.id}:${date}`,
+            "billing_reconciliation_failed",
+            t.id,
+          );
+          continue;
+        }
+      }
       if (["ready", "awaiting_setup"].includes(t.state)) {
         await enqueue(this.db, `backup:${t.id}:${date}`, "backup", {
           tenantId: t.id,

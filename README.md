@@ -2,7 +2,7 @@
 
 A small control service for paid, dedicated UpCloud VMs running **unmodified OpenClaw**. Customer context stays in a portable OpenClaw state directory. Customers can bring a model-provider key or purchase separately metered inference credit.
 
-**Status: implementation and local verification in progress; not a deployed or launch-approved service.** Checkout is disabled, managed models are unverified, and real cloud/payment/messaging/export acceptance evidence is deliberately unset. See `docs/VALIDATION.md` for precisely what has been exercised.
+**Status: implemented with local database/runtime verification; not a deployed or launch-approved service.** Checkout is disabled, managed models are unverified, and real cloud/payment/messaging/export acceptance evidence is deliberately unset. See `docs/VALIDATION.md` for precisely what has been exercised.
 
 ## What is included
 
@@ -25,6 +25,9 @@ docker run --name sac-postgres-test -e POSTGRES_PASSWORD=sac-local-test-only \
 npm run typecheck
 npm test
 npm run build
+# Optional real pinned-OpenClaw encrypted export/restore smoke test:
+docker build -t sovereign-agent-cloud:local .
+scripts/local-runtime-smoke.sh
 ```
 
 Override `TEST_DATABASE_URL` for your own disposable test database. **Tests drop and recreate its public schema. Never point tests at a production database.**

@@ -85,6 +85,9 @@
           },
           "503": {
             "description": "Launch gate closed or dependency unavailable"
+          },
+          "202": {
+            "description": "Sign-in email queued/sent."
           }
         },
         "requestBody": {
@@ -99,7 +102,8 @@
                     "format": "email"
                   }
                 },
-                "additionalProperties": false
+                "additionalProperties": false,
+                "required": ["email"]
               }
             }
           }
@@ -141,7 +145,8 @@
                     "type": "string"
                   }
                 },
-                "additionalProperties": false
+                "additionalProperties": false,
+                "required": ["token"]
               }
             }
           }
@@ -267,7 +272,8 @@
                     "description": "Required for credits; exact verified model choice includes provider/country consent."
                   }
                 },
-                "additionalProperties": false
+                "additionalProperties": false,
+                "required": ["mode"]
               }
             }
           }
@@ -497,7 +503,8 @@
                     "pattern": "^age1[0-9a-z]{58}$"
                   }
                 },
-                "additionalProperties": false
+                "additionalProperties": false,
+                "required": ["recipient"]
               }
             }
           }
@@ -561,7 +568,8 @@
                     "description": "Explicit source address for an owner SSH /32 allow rule."
                   }
                 },
-                "additionalProperties": false
+                "additionalProperties": false,
+                "required": ["publicKey", "sourceIp"]
               }
             }
           }
@@ -728,7 +736,8 @@
                     }
                   }
                 },
-                "additionalProperties": true
+                "additionalProperties": true,
+                "required": ["model", "messages"]
               }
             }
           }

@@ -4,7 +4,7 @@
     name="viewport"
     content="width=device-width,initial-scale=1"
   /><title>Set up your OpenClaw agent</title
-  ><link rel="stylesheet" href="/assets/style.css" />
+  ><link rel="stylesheet" href="/sac-assets/style.css" />
   <body>
     <main>
       <h1>Your OpenClaw agent</h1>
@@ -30,16 +30,20 @@
         >
         <h2>Pair this browser</h2>
         <p>
-          If OpenClaw asks for device approval, compare its device public key
-          with the pending request below. Approve only the request for the
-          browser you just opened.
+          Open the dashboard, then return here and find this browser. Only a
+          device connection observed in your current signed-in session can be
+          approved.
         </p>
-        <button id="devices">Show pending devices</button>
+        <button id="devices">Find this browser</button>
         <pre id="pending"></pre>
         <form id="pair">
-          <label>Request ID<input name="requestId" required /></label
-          ><label>Device public key<input name="publicKey" required /></label
-          ><button>Approve this device</button>
+          <label>Request ID<input name="requestId" readonly required /></label
+          ><label
+            >Device public key<input
+              name="publicKey"
+              readonly
+              required /></label
+          ><button>Approve this browser</button>
         </form>
         <p>
           Telegram and WhatsApp are configured in OpenClaw. iMessage
@@ -57,6 +61,6 @@
         <p id="link"></p>
       </section>
     </main>
-    <script src="/assets/app.js" defer></script>
+    <script src="/sac-assets/app.js" defer></script>
   </body>
 </html>

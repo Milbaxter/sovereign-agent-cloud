@@ -21,8 +21,9 @@ jobs:
       - uses: actions/setup-node@v4
         with: {node-version: '24', cache: npm}
       - run: npm ci
+      - run: npm run format:check
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: bash -n deploy/*.sh scripts/*.sh
+      - run: for script in deploy/*.sh scripts/*.sh; do bash -n "$script"; done
       - run: npm audit --omit=dev
