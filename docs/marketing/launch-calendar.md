@@ -23,6 +23,14 @@ Relative weeks start when the live-service readiness checks pass, not on the dat
 | Week 4, Friday           | Publish one customer example with permission         | Verified result, approved wording, no private account information                            |
 | Week 4, Friday           | Decide whether to expand the offer                   | Target: 10 paid customers; 7 return in following week; contribution margin positive          |
 
+## Pilot before broad promotion
+
+Start with three to five privacy-conscious individual users who already use an AI assistant and can follow the browser setup wizard. The current single-owner model, provider configuration, and encrypted export process need that level of comfort. Family and company deployments come later, after the shared trust boundary is understood.
+
+For each pilot user, complete one recurring task they already care about, return to the saved context in a second session, and export/restore a synthetic version on another host. Measure setup time, support time, hosting cost, and whether they return the following week. Do not interpret the illustrative landing-page demo as this evidence.
+
+Choose the main launch use case from the pilot's repeated successful tasks. Keep the independence message, but lead the public demonstration with the useful outcome and finish with proof that the user can leave. Creator outreach starts after this evidence exists; drafting ten pitches does not validate demand.
+
 ## Five customer interviews
 
 Ask these questions in a 15-minute call:

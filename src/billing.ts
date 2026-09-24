@@ -85,7 +85,7 @@ export class Billing {
         customer_update: { address: "auto" },
         success_url: `${this.c.PUBLIC_ORIGIN}/?checkout=returned`,
         cancel_url: `${this.c.PUBLIC_ORIGIN}/`,
-        expires_at: Math.floor(Date.now() / 1000) + 1800,
+        // Keep retries byte-for-byte stable; Stripe supplies its default expiry.
       },
       { idempotencyKey: `checkout:${order.id}` },
     );

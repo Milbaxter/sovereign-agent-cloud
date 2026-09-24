@@ -18,7 +18,7 @@ Run `docker compose up --build -d`. Migrations run before the API and worker. Mo
 
 ## Access and privacy
 
-Email sign-in links are hashed, expire in 15 minutes, and are consumed only after a browser confirmation. Account sessions last seven days. Secret export, SSH changes, and cancellation require a login less than ten minutes old. Tenant access tickets expire in 60 seconds and are single-use; tenant sessions last one hour.
+Email sign-in links are hashed, expire in 15 minutes, and are consumed only after a browser confirmation. Account sessions last seven days. The portal offers a fresh sign-in link without signing out; email links preserve the selected inference mode. Secret export, SSH changes, and cancellation require a login less than ten minutes old. Tenant access tickets expire in 60 seconds and are single-use; tenant sessions last one hour.
 
 The browser terminal exposes only the upstream wizard, not an unauthenticated root shell. The authenticated tenant management service has access to that tenant's Docker socket to perform maintenance; it is part of the trusted computing base. It does not have the UpCloud account token. Owner-authorized SSH keys grant root privileges to the owner's isolated VM from the explicit IPv4 address supplied with the key. The address is persisted as a /32 firewall rule.
 
@@ -38,7 +38,7 @@ Repeated provisioning failure preserves the paid order and raises an incident. R
 
 The credit gateway reserves the full configured context ceiling plus capped output before dispatch. This deliberately over-reserves briefly to prevent undercounting prompt/tool tokens. Actual usage releases the difference. A disconnected browser does not cancel usage collection. Partial generations are never retried automatically. Missing/invalid usage is quarantined; after 24 hours the reservation is released with no customer charge and an operator incident. Reconcile provider invoices independently; the operator absorbs unresolved usage. Refunds and chargebacks reverse credit cumulatively, block new requests where debt remains, and never silently create negative wallet balances.
 
-Daily tenant backups pause the Gateway briefly. Subscription cancellation ends at the paid period boundary. A failed renewal has a seven-day grace period. Suspension stops OpenClaw but leaves the access service available for export; the VM/storage continue costing money during the 30-day retention period. Deletion removes the VM, recorded disks, DNS record, and backup objects. Subscription recovery before deletion resumes the existing agent. A control-plane outage must be repaired promptly because lifecycle and backup jobs run there.
+Daily tenant backups pause the Gateway briefly. Subscription cancellation ends at the paid period boundary. A failed renewal has a seven-day grace period. Suspension shares the host operation lock with exports/backups so archive cleanup cannot restart an already suspended workload. Existing access sessions are rejected while export sessions remain usable. Suspension stops OpenClaw but leaves the access service available for export; the VM/storage continue costing money during the 30-day retention period. Deletion removes the VM, recorded disks, DNS record, and backup objects. Subscription recovery before deletion resumes the existing agent. A control-plane outage must be repaired promptly because lifecycle and backup jobs run there.
 
 ## Updates and rollback
 

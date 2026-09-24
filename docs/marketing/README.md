@@ -9,7 +9,7 @@ The landing page lives in `public/welcome/` and is served at `/welcome/` by the 
 - `/api/catalog` provides a public availability hint. Failed requests, malformed data, disabled checkout, test billing, and unavailable managed models never become a claim that live checkout is ready.
 - Customers can still open the account portal when checkout is disabled. The portal performs login, provider/location consent, and account-bound checkout. Marketing never creates orders, changes credits, grants access, or sends secrets.
 - A mode link is only a preselection. The portal remains responsible for reconfirming the mode and provider after email sign-in, including when the sign-in link opens on another device.
-- No public API, session path, webhook contract, release gate, or Stripe configuration is changed by this integration.
+- The optional sign-in `mode` field preserves the inference preselection in the emailed link; checkout still requires explicit confirmation. The catalog applies the same release gate as checkout.
 
 ## What is included
 
@@ -26,7 +26,7 @@ All material is draft and unposted. Set `PUBLIC_URL` to the eventual public `/we
 
 The source is now public under Apache-2.0. This does not make every model open source or establish local inference, production hosting, complete restoration, or security acceptance. OpenClaw and third-party models retain their licenses. The walkthrough and downloadable JSON are explicitly illustrative, not live product evidence. Do not copy the illustrative export over the backend's encrypted real export.
 
-The founder offer remains €25/month plus inference and applicable tax, with a proposed 12-month base-price guarantee for the first 50 customers. The backend currently limits outstanding/active tenant slots and releases abandoned orders; that is not a lifetime count of the first 50 people. Verify cohort enforcement and commercial terms before publishing a strict historical-customer cap.
+The founder offer remains €25/month plus inference and applicable tax, with a proposed 12-month base-price guarantee for the first 50 customers. The backend limits distinct paid/reserved accounts, retains paid founders after deletion, and releases abandoned unpaid reservations. This is an account limit, not proof of unique real-world people; verify commercial terms and the configured limit before publishing the offer.
 
 Release acceptance remains governed by `docs/VALIDATION.md` and `release-evidence.json`. These marketing files do not supply missing live evidence. Privacy, cancellation, operator access, and deletion copy must be reconciled with the verified deployment before paid launch.
 

@@ -720,3 +720,239 @@ test("browser pairing extracts only a well-formed device connection key", async 
   );
   assert.equal(deviceFromConnect("not JSON"), null);
 });
+
+test("checkout retries keep identical Stripe parameters as time advances", async (t) => {
+  const requests: unknown[] = [];
+  const stripe = {
+    prices: {
+      retrieve: async () => ({
+        currency: "eur",
+        unit_amount: 2500,
+        tax_behavior: "exclusive",
+        recurring: { interval: "month", interval_count: 1 },
+      }),
+    },
+    checkout: {
+      sessions: {
+        create: async (params: unknown, options: unknown) => {
+          requests.push({ params, options });
+          return { id: "cs_stable", url: "https://checkout.stripe.com/test" };
+        },
+      },
+    },
+  };
+  const billing = new Billing(db, c, stripe as any);
+  const order = {
+    id: randomUUID(),
+    account_id: account,
+    tenant_id: tenant,
+    kind: "hosting",
+  };
+  const now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  await billing.checkout(order, "cus_test");
+  t.mock.method(Date, "now", () => now + 5000);
+  await billing.checkout(order, "cus_test");
+  assert.deepEqual(requests[0], requests[1]);
+});
+
+test("catalog refuses to advertise live checkout when release evidence is missing", async (t) => {
+  const app = await buildApp(
+    {
+      ...c,
+      BILLING_MODE: "live",
+      CHECKOUT_ENABLED: true,
+      CREDITS_ENABLED: true,
+      RELEASE_EVIDENCE_FILE: "release-evidence.json",
+    },
+    db,
+    [model],
+  );
+  t.after(() => app.close());
+  const catalog = (await app.inject("/api/catalog")).json();
+  assert.equal(catalog.checkoutEnabled, false);
+  assert.equal(catalog.creditsEnabled, false);
+});
+
+test("usage settlement persists only validated counters from upstream", async () => {
+  await transaction(db, (tx) => credit(tx, account, "topup", 10000n));
+  const id = await reserve(db, account, tenant, model, 1000);
+  await settle(db, id, model, {
+    prompt_tokens: 100,
+    completion_tokens: 100,
+    prompt_tokens_details: {
+      cached_tokens: 50,
+      prompt: "private provider text",
+    },
+    completion_tokens_details: {
+      reasoning_tokens: 10,
+      reasoning: "private reasoning text",
+    },
+    unexpected: "private completion text",
+  } as any);
+  const request = (await db.query("SELECT * FROM requests WHERE id=$1", [id]))
+    .rows[0];
+  assert.equal(request.state, "settled");
+  assert.deepEqual(request.usage, {
+    prompt_tokens: 100,
+    completion_tokens: 100,
+    prompt_tokens_details: { cached_tokens: 50 },
+    completion_tokens_details: { reasoning_tokens: 10 },
+  });
+  const ledger = (
+    await db.query("SELECT metadata FROM ledger WHERE kind='usage'")
+  ).rows[0];
+  assert.deepEqual(ledger.metadata.usage, request.usage);
+  assert.doesNotMatch(JSON.stringify([request, ledger]), /private/);
+});
+
+test("invalid reasoning counters are quarantined without debiting credit", async () => {
+  await transaction(db, (tx) => credit(tx, account, "topup", 10000n));
+  const id = await reserve(db, account, tenant, model, 1000);
+  await settle(db, id, model, {
+    prompt_tokens: 10,
+    completion_tokens: 20,
+    completion_tokens_details: { reasoning_tokens: -1 },
+  });
+  assert.equal(
+    (await db.query("SELECT state FROM requests WHERE id=$1", [id])).rows[0]
+      .state,
+    "unknown",
+  );
+  assert.equal(
+    (await db.query("SELECT balance FROM wallets")).rows[0].balance,
+    "10000",
+  );
+});
+
+test("expired entitlement denies new access before the lifecycle worker catches up", async (t) => {
+  await db.query(
+    "UPDATE tenants SET paid_until=now()-interval '1 hour',grace_until=NULL WHERE id=$1",
+    [tenant],
+  );
+  const session = token();
+  await db.query(
+    "INSERT INTO sessions(hash,account_id,expires_at) VALUES($1,$2,now()+interval '1 hour')",
+    [hash(session), account],
+  );
+  const app = await buildApp(c, db, [model]);
+  t.after(() => app.close());
+  const request = {
+    method: "POST" as const,
+    url: `/api/tenants/${tenant}/access`,
+    headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+    payload: {},
+  };
+  assert.equal((await app.inject(request)).statusCode, 409);
+  await db.query(
+    "UPDATE tenants SET grace_until=now()+interval '1 day' WHERE id=$1",
+    [tenant],
+  );
+  assert.equal((await app.inject(request)).statusCode, 200);
+});
+
+test("suspension rejects existing access sessions but preserves export sessions", async () => {
+  const { tenantSession } = await import("../src/tenant/session.js");
+  const sql = new DatabaseSync(":memory:");
+  try {
+    sql.exec(
+      "CREATE TABLE sessions(hash TEXT PRIMARY KEY,expiry INTEGER,action TEXT); CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)",
+    );
+    for (const action of ["access", "export"])
+      sql
+        .prepare("INSERT INTO sessions VALUES(?,?,?)")
+        .run(hash(action), Date.now() + 60000, action);
+    assert.equal(tenantSession(sql, "access").action, "access");
+    sql.prepare("INSERT INTO settings VALUES('suspended','true')").run();
+    assert.throws(() => tenantSession(sql, "access"), /AGENT_SUSPENDED/);
+    assert.equal(tenantSession(sql, "export").action, "export");
+    assert.throws(() => tenantSession(sql, "unknown"), /SIGN_IN/);
+  } finally {
+    sql.close();
+  }
+});
+
+test("email sign-in carries the selected inference mode without an external redirect", async (t) => {
+  const nodemailer = (await import("nodemailer")).default;
+  let sent: any;
+  t.mock.method(
+    nodemailer,
+    "createTransport",
+    () =>
+      ({
+        sendMail: async (mail: any) => {
+          sent = mail;
+        },
+      }) as any,
+  );
+  const app = await buildApp(
+    {
+      ...c,
+      SMTP_URL: "smtp://test.invalid",
+      EMAIL_FROM: "test@example.invalid",
+    },
+    db,
+    [model],
+  );
+  t.after(() => app.close());
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/auth/request",
+    headers: { origin: c.PUBLIC_ORIGIN },
+    payload: { email: "customer@example.invalid", mode: "credits" },
+  });
+  assert.equal(response.statusCode, 202);
+  const url = new URL(sent.text.split("\n")[0].slice(5));
+  assert.equal(url.origin, c.PUBLIC_ORIGIN);
+  assert.equal(url.searchParams.get("mode"), "credits");
+  assert.match(url.hash, /^#login=/);
+  const bad = await app.inject({
+    method: "POST",
+    url: "/api/auth/request",
+    headers: { origin: c.PUBLIC_ORIGIN },
+    payload: { email: "customer@example.invalid", mode: "https://evil.test" },
+  });
+  assert.equal(bad.statusCode, 400);
+});
+
+test("paid founders retain cohort places after deletion; abandoned unpaid accounts do not", async (t) => {
+  const founderOrder = randomUUID();
+  await db.query(
+    "INSERT INTO orders(id,account_id,tenant_id,kind,mode,amount_cents,state) VALUES($1,$2,$3,'hosting','test',2500,'paid')",
+    [founderOrder, account, tenant],
+  );
+  await db.query("UPDATE tenants SET state='deleted' WHERE id=$1", [tenant]);
+  const applicant = randomUUID(),
+    session = token();
+  await db.query(
+    "INSERT INTO accounts(id,email,stripe_customer) VALUES($1,'applicant@test.example','cus_applicant')",
+    [applicant],
+  );
+  await db.query(
+    "INSERT INTO sessions(hash,account_id,expires_at) VALUES($1,$2,now()+interval '1 hour')",
+    [hash(session), applicant],
+  );
+  const billing = new Billing(db, c);
+  billing.checkout = async () =>
+    ({ id: "cs_fixture", url: "https://checkout.stripe.com/fixture" }) as any;
+  const app = await buildApp(
+    { ...c, CHECKOUT_ENABLED: true, MAX_TENANTS: 1 },
+    db,
+    [model],
+    billing,
+  );
+  t.after(() => app.close());
+  const request = {
+    method: "POST" as const,
+    url: "/api/checkout",
+    headers: { origin: c.PUBLIC_ORIGIN, cookie: `session=${session}` },
+    payload: { mode: "byok" },
+  };
+  const full = await app.inject(request);
+  assert.equal(full.statusCode, 409);
+  assert.equal(full.json().error, "COHORT_FULL");
+  await db.query("UPDATE orders SET state='expired' WHERE id=$1", [
+    founderOrder,
+  ]);
+  assert.equal((await app.inject(request)).statusCode, 200);
+});

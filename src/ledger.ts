@@ -173,12 +173,25 @@ export async function settle(
       return;
     }
     let charged: bigint;
+    let billable: NonNullable<typeof usage>;
     try {
+      const reasoning = usage.completion_tokens_details?.reasoning_tokens ?? 0;
+      if (!Number.isSafeInteger(reasoning) || reasoning < 0)
+        throw Error("INVALID_USAGE");
+      // Persist only billing counters, never arbitrary upstream fields or text.
+      billable = {
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        prompt_tokens_details: {
+          cached_tokens: usage.prompt_tokens_details?.cached_tokens ?? 0,
+        },
+        completion_tokens_details: { reasoning_tokens: reasoning },
+      };
       charged = price(
         model,
-        usage.prompt_tokens,
-        usage.completion_tokens,
-        usage.prompt_tokens_details?.cached_tokens ?? 0,
+        billable.prompt_tokens,
+        billable.completion_tokens,
+        billable.prompt_tokens_details!.cached_tokens,
       );
     } catch {
       await tx.query("UPDATE requests SET state='unknown' WHERE id=$1", [id]);
@@ -222,13 +235,13 @@ export async function settle(
         JSON.stringify({
           model: model.id,
           rateVersion: model.rateVersion,
-          usage,
+          usage: billable,
         }),
       ],
     );
     await tx.query(
       "UPDATE requests SET state='settled',charged=$2,usage=$3 WHERE id=$1",
-      [id, charged.toString(), JSON.stringify(usage)],
+      [id, charged.toString(), JSON.stringify(billable)],
     );
   });
 }

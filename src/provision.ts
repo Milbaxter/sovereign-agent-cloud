@@ -23,7 +23,13 @@ export async function tenantCall(
       "content-type": "application/json",
     },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(path === "backup" ? 300000 : 20000),
+    signal: AbortSignal.timeout(
+      path === "backup"
+        ? 300000
+        : ["suspend", "resume"].includes(path)
+          ? 180000
+          : 20000,
+    ),
   });
   if (!response.ok) throw Error(`TENANT_${response.status}`);
   return response;

@@ -109,9 +109,23 @@ export function launchGate(c: Config, credits = false) {
       "backupLifecycle",
       "pilot",
     ])
-      if (!evidence[name]?.passed || !evidence[name]?.evidence)
+      if (
+        evidence[name]?.passed !== true ||
+        typeof evidence[name]?.evidence !== "string" ||
+        !evidence[name].evidence.trim()
+      )
         throw Object.assign(Error("LAUNCH_EVIDENCE_MISSING"), {
           statusCode: 503,
         });
+  }
+}
+
+// The catalog and purchase endpoints must report the same effective gate.
+export function checkoutAvailable(c: Config, credits = false): boolean {
+  try {
+    launchGate(c, credits);
+    return true;
+  } catch {
+    return false;
   }
 }

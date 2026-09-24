@@ -30,11 +30,13 @@ export function auth(app: FastifyInstance, db: DB, c: Config) {
     "/api/auth/request",
     { config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } },
     async (req, reply) => {
-      const email = z
-        .object({ email: z.string().email().max(254) })
-        .parse(req.body)
-        .email.trim()
-        .toLowerCase();
+      const body = z
+        .object({
+          email: z.string().trim().email().max(254),
+          mode: z.enum(["byok", "credits"]).optional(),
+        })
+        .parse(req.body);
+      const email = body.email.toLowerCase();
       if (!c.SMTP_URL)
         throw Object.assign(Error("EMAIL_UNAVAILABLE"), { statusCode: 503 });
       const secret = token();
@@ -50,12 +52,15 @@ export function auth(app: FastifyInstance, db: DB, c: Config) {
           [hash(secret), account.id],
         );
       });
+      const signInUrl = new URL("/", c.PUBLIC_ORIGIN);
+      if (body.mode) signInUrl.searchParams.set("mode", body.mode);
+      signInUrl.hash = `login=${secret}`;
       // Fragment is not sent to HTTP servers, mail-link scanners, or access logs.
       await nodemailer.createTransport(c.SMTP_URL).sendMail({
         from: c.EMAIL_FROM,
         to: email,
         subject: "Sign in to Your Agent",
-        text: `Open ${c.PUBLIC_ORIGIN}/#login=${secret}\nThis single-use link expires in 15 minutes. If you did not request it, ignore this email.`,
+        text: `Open ${signInUrl}\nThis single-use link expires in 15 minutes. If you did not request it, ignore this email.`,
       });
       return reply
         .code(202)

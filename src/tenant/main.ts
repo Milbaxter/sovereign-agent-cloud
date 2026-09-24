@@ -19,6 +19,7 @@ import { execFile } from "node:child_process";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { consumeTicket } from "./tickets.js";
 import { gatewayProxy } from "./gateway-proxy.js";
+import { tenantSession } from "./session.js";
 import { z } from "zod";
 import { token, hash } from "../crypto.js";
 const exec = promisify(execFile),
@@ -30,7 +31,12 @@ const db = new DatabaseSync("/var/lib/sac/access.sqlite");
 db.exec(
   "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS tickets(id TEXT PRIMARY KEY,expiry INTEGER); CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY,created INTEGER,expiry INTEGER,action TEXT,recipient TEXT); CREATE TABLE IF NOT EXISTS exports(id TEXT PRIMARY KEY,session_hash TEXT,path TEXT,expiry INTEGER); CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT);",
 );
-const app = Fastify({ logger: false, bodyLimit: 10000 });
+const app = Fastify({
+  logger: false,
+  bodyLimit: 10000,
+  // Listener is loopback-only and Caddy replaces the forwarded client address.
+  trustProxy: (_address: string, hop: number) => hop === 0,
+});
 await app.register(cookie);
 await app.register(rateLimit, { max: 60, timeWindow: "1 minute" });
 app.setErrorHandler((e: any, _req, reply) =>
@@ -39,17 +45,7 @@ app.setErrorHandler((e: any, _req, reply) =>
     .send({ error: e.statusCode ? e.message : "OPERATION_FAILED" }),
 );
 function auth(req: any) {
-  const session = req.cookies.agent_session;
-  const row =
-    session &&
-    db
-      .prepare("SELECT * FROM sessions WHERE hash=? AND expiry>?")
-      .get(hash(session), Date.now());
-  if (!row)
-    throw Object.assign(Error("SIGN_IN_FROM_YOUR_ACCOUNT"), {
-      statusCode: 401,
-    });
-  return row as any;
+  return tenantSession(db, req.cookies.agent_session) as any;
 }
 function management(req: any) {
   const supplied = Buffer.from(req.headers.authorization ?? ""),
@@ -78,7 +74,8 @@ const claw = async (args: string[]) =>
     maxBuffer: 2_000_000,
   });
 gatewayProxy(app, db, origin);
-app.get("/authorize", async (req, reply) => {
+// Each asset and socket handshake invokes forward_auth; do not throttle a page's auth subrequests.
+app.get("/authorize", { config: { rateLimit: false } }, async (req, reply) => {
   const s = auth(req);
   if (
     s.action !== "access" ||
@@ -171,11 +168,26 @@ app.post("/internal/suspend", async () => {
   db.prepare(
     "INSERT OR REPLACE INTO settings VALUES('suspended','true')",
   ).run();
-  await exec("docker", ["stop", "openclaw"]);
+  await exec(
+    "flock",
+    ["-w", "120", "/var/lib/sac/locks/operation", "docker", "stop", "openclaw"],
+    { timeout: 180000 },
+  );
   return { ok: true };
 });
 app.post("/internal/resume", async () => {
-  await exec("docker", ["start", "openclaw"]);
+  await exec(
+    "flock",
+    [
+      "-w",
+      "120",
+      "/var/lib/sac/locks/operation",
+      "docker",
+      "start",
+      "openclaw",
+    ],
+    { timeout: 180000 },
+  );
   db.prepare(
     "INSERT OR REPLACE INTO settings VALUES('suspended','false')",
   ).run();

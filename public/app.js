@@ -26,10 +26,11 @@ const jump = async (path, body = {}) => {
   const data = await api(path, body);
   location.assign(data.url);
 };
-let catalog, me, timer;
+let catalog, me, timer, renderedAgent;
 const initialMode = new URLSearchParams(location.search).get("mode");
 if (["byok", "credits"].includes(initialMode)) $("#mode").value = initialMode;
 async function refresh() {
+  clearTimeout(timer);
   catalog = await api("/api/catalog");
   try {
     me = await api("/api/me");
@@ -42,16 +43,22 @@ async function refresh() {
     notice(
       "Preview: checkout is disabled until launch verification is complete.",
     );
-  if (!me) return;
+  if (!me) {
+    renderedAgent = undefined;
+    $("#agent").replaceChildren();
+    return;
+  }
   $("#email").textContent = me.email;
   const t = me.tenants[0];
   $("#purchase").hidden = !!t && t.state !== "pending_payment";
   $("#checkout").disabled = !catalog.checkoutEnabled;
   $("#topup").disabled =
+    !catalog.checkoutEnabled ||
     !catalog.creditsEnabled ||
     !t ||
     t.mode !== "credits" ||
     !["ready", "awaiting_setup"].includes(t.state);
+  const selectedModel = $("#model").value;
   $("#model").replaceChildren(
     ...catalog.models.map((m) => {
       const o = document.createElement("option");
@@ -60,11 +67,20 @@ async function refresh() {
       return o;
     }),
   );
+  if (catalog.models.some((m) => m.id === selectedModel))
+    $("#model").value = selectedModel;
+  if (t?.state === "pending_payment") {
+    $("#mode").value = t.mode;
+    if (t.model_id) $("#model").value = t.model_id;
+  }
+  $("#mode").disabled = t?.state === "pending_payment";
+  $("#model").disabled = t?.state === "pending_payment";
   $("#balance").textContent =
     `Balance: €${(Number(me.wallet.balance) / 1e6).toFixed(2)}. Reserved for requests: €${(Number(me.wallet.reserved) / 1e6).toFixed(4)}.${Number(me.wallet.debt) > 0 ? " Payment reversal outstanding; inference is paused." : ""}`;
   const area = $("#agent");
-  area.replaceChildren();
-  if (t) {
+  const signature = JSON.stringify(t ?? null);
+  if (signature !== renderedAgent) area.replaceChildren();
+  if (t && signature !== renderedAgent) {
     const section = document.createElement("section"),
       h = document.createElement("h2");
     h.textContent = "Your agent";
@@ -138,10 +154,13 @@ async function refresh() {
       }
     });
     area.append(section);
-    if (["provisioning", "awaiting_setup"].includes(t.state)) {
-      clearTimeout(timer);
-      timer = setTimeout(() => void refresh().catch(() => {}), 10000);
-    }
+  }
+  renderedAgent = signature;
+  if (
+    t &&
+    ["pending_payment", "provisioning", "awaiting_setup"].includes(t.state)
+  ) {
+    timer = setTimeout(() => void refresh().catch(() => {}), 10000);
   }
   updateRates();
 }
@@ -161,8 +180,15 @@ function updateRates() {
 $("#login-form").onsubmit = run(async () => {
   await api("/api/auth/request", {
     email: new FormData($("#login-form")).get("email"),
+    mode: $("#mode").value,
   });
   notice("Check your email. Open the link and confirm sign-in.");
+});
+$("#reauth").onclick = run(async () => {
+  await api("/api/auth/request", { email: me.email, mode: $("#mode").value });
+  notice(
+    "Check your email and open the new link, then retry your action. Your agent stays running.",
+  );
 });
 $("#logout").onclick = run(async () => {
   await api("/api/auth/logout", {});
@@ -189,7 +215,7 @@ $("#model").onchange = updateRates;
   const fragment = new URLSearchParams(location.hash.slice(1)),
     secret = fragment.get("login");
   if (secret) {
-    history.replaceState(null, "", location.pathname);
+    history.replaceState(null, "", location.pathname + location.search);
     if (confirm("Sign in to Your Agent using this email link?"))
       await api("/api/auth/consume", { token: secret });
   }
