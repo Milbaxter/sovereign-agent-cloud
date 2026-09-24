@@ -21,6 +21,14 @@ export class DNS {
     return json.result;
   }
   async ensure(hostname: string, ip: string) {
+    if (this.c.DNS_MODE === "test_sslip") {
+      if (
+        this.c.BILLING_MODE !== "test" ||
+        !hostname.endsWith(`.${ip.replaceAll(".", "-")}.sslip.io`)
+      )
+        throw Error("INVALID_TEST_HOSTNAME");
+      return `test-sslip:${hostname}`;
+    }
     const records = await this.call(
       `?type=A&name=${encodeURIComponent(hostname)}`,
     );
@@ -43,6 +51,11 @@ export class DNS {
     ).id;
   }
   async remove(id: string) {
+    if (id.startsWith("test-sslip:")) {
+      if (this.c.DNS_MODE !== "test_sslip" || this.c.BILLING_MODE !== "test")
+        throw Error("TEST_DNS_REQUIRES_TEST_BILLING");
+      return;
+    }
     try {
       await this.call(`/${id}`, "DELETE");
     } catch (e: any) {

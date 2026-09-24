@@ -13,6 +13,8 @@ const schema = z.object({
   PUBLIC_ORIGIN: z.string().url(),
   SEARCH_INDEXING_ENABLED: bool,
   TENANT_DOMAIN: z.string().regex(/^[a-z0-9.-]+$/),
+  DNS_MODE: z.enum(["cloudflare", "test_sslip"]).default("cloudflare"),
+  TEST_ACCOUNT_EMAIL: z.union([z.literal(""), z.string().email()]).default(""),
   BILLING_MODE: z.enum(["test", "live"]).default("test"),
   CHECKOUT_ENABLED: bool,
   CREDITS_ENABLED: bool,
@@ -53,6 +55,16 @@ export type Config = z.infer<typeof schema> & {
 };
 export function config(env: NodeJS.ProcessEnv = process.env): Config {
   const c = schema.parse(env);
+  if (
+    c.BILLING_MODE !== "test" &&
+    (c.DNS_MODE === "test_sslip" || c.TEST_ACCOUNT_EMAIL)
+  )
+    throw Error("TEST_CONFIG_REQUIRES_TEST_BILLING");
+  if (
+    c.DNS_MODE === "test_sslip" &&
+    (!c.TEST_ACCOUNT_EMAIL || c.SEARCH_INDEXING_ENABLED)
+  )
+    throw Error("TEST_DNS_REQUIRES_PRIVATE_TEST_ACCOUNT");
   if (c.NODE_ENV === "production" && !c.PUBLIC_ORIGIN.startsWith("https://"))
     throw Error("HTTPS_REQUIRED");
   if (

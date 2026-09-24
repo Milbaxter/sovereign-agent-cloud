@@ -113,7 +113,7 @@ export async function buildApp(
     },
     { prefix: "/webhooks" },
   );
-  app.post("/bootstrap/:id", async (req) => {
+  app.post("/bootstrap/:id", async (req, reply) => {
     const id = z
         .string()
         .uuid()
@@ -122,12 +122,20 @@ export async function buildApp(
     return transaction(db, async (tx) => {
       const row = (
         await tx.query(
-          "UPDATE tenants SET bootstrap_hash=NULL WHERE id=$1 AND bootstrap_hash=$2 AND bootstrap_expires_at>now() RETURNING bundle_cipher",
+          "SELECT bundle_cipher,bootstrap_ready FROM tenants WHERE id=$1 AND bootstrap_hash=$2 AND bootstrap_expires_at>now() FOR UPDATE",
           [id, hash(secret)],
         )
       ).rows[0];
       if (!row)
         throw Object.assign(Error("BOOTSTRAP_EXPIRED"), { statusCode: 403 });
+      if (!row.bootstrap_ready)
+        return reply
+          .code(503)
+          .header("retry-after", "5")
+          .send({ error: "BOOTSTRAP_NOT_READY" });
+      await tx.query("UPDATE tenants SET bootstrap_hash=NULL WHERE id=$1", [
+        id,
+      ]);
       return JSON.parse(unseal(row.bundle_cipher, c.ENCRYPTION_KEY));
     });
   });

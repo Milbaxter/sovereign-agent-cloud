@@ -4,6 +4,7 @@ import type { Config, Model } from "./config.js";
 import { Billing } from "./billing.js";
 import { Provisioner, tenantCall } from "./provision.js";
 import { Backups } from "./backup.js";
+import { providerHostname } from "./providers/hostname.js";
 import { quarantineStaleUsage } from "./ledger.js";
 export class Worker {
   readonly provisioner: Provisioner;
@@ -127,7 +128,7 @@ export class Worker {
       if (!t.provider_id) throw Error("PROVIDER_ID_REQUIRED");
       if (!t.resume_plan) {
         const remote = await this.provisioner.cloud.details(t.provider_id);
-        if (remote.hostname !== t.hostname)
+        if (remote.hostname !== providerHostname(t))
           throw Error("PROVIDER_OWNERSHIP_MISMATCH");
         if (!remote.plan || remote.plan === "custom")
           throw Error("RESUME_PLAN_REQUIRED");
@@ -179,7 +180,7 @@ export class Worker {
         return;
       if (!t.provider_id) throw Error("PROVIDER_ID_REQUIRED");
       const remote = await this.provisioner.cloud.details(t.provider_id);
-      if (remote.hostname !== t.hostname)
+      if (remote.hostname !== providerHostname(t))
         throw Error("PROVIDER_OWNERSHIP_MISMATCH");
       // Upgrade path for a tenant suspended by the old container-only flow.
       if (!t.resume_plan) {

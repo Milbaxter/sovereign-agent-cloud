@@ -1,8 +1,15 @@
 import { config, models } from "../src/config.js";
 import { UpCloud } from "../src/providers/upcloud.js";
 import { imagePin } from "../src/provision.js";
+const journey = process.argv
+  .find((x) => x.startsWith("--journey="))
+  ?.split("=")[1];
+if (journey && !["byok", "credits"].includes(journey))
+  throw Error("INVALID_JOURNEY_MODE");
 const c = config(),
   checks: { name: string; ok: boolean; detail?: string }[] = [];
+if (journey && c.BILLING_MODE !== "test")
+  throw Error("JOURNEY_REQUIRES_TEST_BILLING");
 const check = (name: string, ok: boolean, detail?: string) =>
   checks.push({ name, ok, detail });
 check(
@@ -13,11 +20,12 @@ check(
 check("Tenant immutable image", imagePin(c.TENANT_IMAGE));
 for (const key of [
   "UPCloud_TOKEN",
-  "CLOUDFLARE_TOKEN",
-  "CLOUDFLARE_ZONE_ID",
+  ...(c.DNS_MODE === "cloudflare"
+    ? ["CLOUDFLARE_TOKEN", "CLOUDFLARE_ZONE_ID"]
+    : ["TEST_ACCOUNT_EMAIL"]),
   "SMTP_URL",
   "EMAIL_FROM",
-  "BACKUP_S3_BUCKET",
+  ...(journey ? [] : ["BACKUP_S3_BUCKET"]),
   "BACKUP_AGE_RECIPIENT",
   "ADMIN_CIDR",
   "ADMIN_SSH_PUBLIC_KEY",
@@ -54,7 +62,11 @@ if (c.UPCLOUD_TOKEN) {
     check("UpCloud API read", false);
   }
 }
-for (const model of models(c)) {
+if (journey)
+  console.log(
+    "Journey scope: scheduled S3 backup/restore checks deferred; not production acceptance.",
+  );
+for (const model of journey === "byok" ? [] : models(c)) {
   const key = process.env[model.keyEnv];
   check(`${model.id} secret present`, !!key);
   if (key) {

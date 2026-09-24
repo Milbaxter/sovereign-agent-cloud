@@ -9,6 +9,7 @@ import {
   assertEncryptedStorage,
 } from "./providers/upcloud.js";
 import { DNS } from "./providers/dns.js";
+import { providerHostname, publicHostname } from "./providers/hostname.js";
 export function imagePin(image: string) {
   return /^ghcr\.io\/[a-z0-9/._-]+:[a-zA-Z0-9._-]+@sha256:[a-f0-9]{64}$/.test(
     image,
@@ -87,7 +88,7 @@ export class Provisioner {
         throw Error("PROVISIONING_CONFIG_MISSING");
       let remote = t.provider_id
         ? await this.cloud.details(t.provider_id)
-        : await this.cloud.find(t.hostname);
+        : await this.cloud.find(providerHostname(t));
       if (!remote) {
         // Persist the attempt BEFORE the network request. An uncertain request is never blindly repeated.
         if (t.create_attempted_at) {
@@ -134,7 +135,7 @@ export class Provisioner {
           .map(([k, v]) => `${k}='${v.replaceAll("'", "'\\''")}'`)
           .join("\n");
         await conn.query(
-          "UPDATE tenants SET create_attempted_at=now(),bootstrap_hash=$2,bootstrap_expires_at=now()+interval '30 minutes',bundle_cipher=$3,inference_key_hash=$4,inference_key_cipher=$5,state='provisioning' WHERE id=$1",
+          "UPDATE tenants SET provider_hostname=COALESCE(provider_hostname,hostname),bootstrap_ready=false,create_attempted_at=now(),bootstrap_hash=$2,bootstrap_expires_at=now()+interval '30 minutes',bundle_cipher=$3,inference_key_hash=$4,inference_key_cipher=$5,state='provisioning' WHERE id=$1",
           [
             id,
             hash(bootstrap),
@@ -145,21 +146,21 @@ export class Provisioner {
         );
         try {
           remote = await this.cloud.create(
-            t.hostname,
+            providerHostname(t),
             id,
             userdata.replace("# BOOTSTRAP_VARIABLES", header),
           );
         } catch (e: any) {
           if (createRejected(e))
             await conn.query(
-              "UPDATE tenants SET create_attempted_at=NULL,bootstrap_hash=NULL,bootstrap_expires_at=NULL,bundle_cipher=NULL,inference_key_hash=NULL,inference_key_cipher=NULL WHERE id=$1",
+              "UPDATE tenants SET bootstrap_ready=false,create_attempted_at=NULL,bootstrap_hash=NULL,bootstrap_expires_at=NULL,bundle_cipher=NULL,inference_key_hash=NULL,inference_key_cipher=NULL WHERE id=$1",
               [id],
             );
           throw e;
         }
       }
       remote = await this.cloud.details(remote.uuid);
-      if (remote.hostname !== t.hostname)
+      if (remote.hostname !== providerHostname(t))
         throw Error("PROVIDER_OWNERSHIP_MISMATCH");
       const ip = remote.ip_addresses?.ip_address?.find(
         (x: any) => x.access === "public" && x.family === "IPv4",
@@ -175,8 +176,25 @@ export class Provisioner {
       // Check both newly created and adopted VMs before DNS or customer setup.
       assertEncryptedStorage(remote);
       if (!ip) throw Error("WAITING_FOR_PUBLIC_IP");
-      const dnsId = await this.dns.ensure(t.hostname, ip);
-      await conn.query("UPDATE tenants SET dns_id=$2 WHERE id=$1", [id, dnsId]);
+      const hostname = publicHostname(this.c, t, ip);
+      const dnsId = await this.dns.ensure(hostname, ip);
+      await transaction(this.db, async (tx) => {
+        const latest = (
+          await tx.query("SELECT * FROM tenants WHERE id=$1 FOR UPDATE", [id])
+        ).rows[0];
+        if (!latest.bootstrap_hash && latest.hostname !== hostname)
+          throw Error("BOOTSTRAP_HOSTNAME_ALREADY_CONSUMED");
+        let bundle = latest.bundle_cipher;
+        if (latest.bootstrap_hash && bundle) {
+          const config = JSON.parse(unseal(bundle, this.c.ENCRYPTION_KEY));
+          config.hostname = hostname;
+          bundle = seal(JSON.stringify(config), this.c.ENCRYPTION_KEY);
+        }
+        await tx.query(
+          "UPDATE tenants SET provider_hostname=COALESCE(provider_hostname,hostname),hostname=$2,dns_id=$3,bundle_cipher=$4,bootstrap_ready=true WHERE id=$1",
+          [id, hostname, dnsId, bundle],
+        );
+      });
       t = (await conn.query("SELECT * FROM tenants WHERE id=$1", [id])).rows[0];
       const health: any = await (await tenantCall(this.c, t, "status")).json();
       if (!health.installed) throw Error("WAITING_FOR_BOOTSTRAP");

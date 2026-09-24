@@ -38,6 +38,8 @@ export function auth(app: FastifyInstance, db: DB, c: Config) {
         })
         .parse(req.body);
       const email = body.email.toLowerCase();
+      if (c.TEST_ACCOUNT_EMAIL && email !== c.TEST_ACCOUNT_EMAIL.toLowerCase())
+        throw Object.assign(Error("TEST_ACCOUNT_ONLY"), { statusCode: 403 });
       if (!c.SMTP_URL)
         throw Object.assign(Error("EMAIL_UNAVAILABLE"), { statusCode: 503 });
       const secret = token();

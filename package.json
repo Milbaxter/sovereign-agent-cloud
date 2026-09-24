@@ -17,8 +17,11 @@
     "migrate": "tsx src/migrate.ts",
     "preflight": "tsx scripts/preflight.ts",
     "upcloud:inspect": "node --env-file-if-exists=.env --import tsx scripts/upcloud-inspect.ts",
-    "format": "prettier --write src tests scripts public tenant-public docs/openapi.json",
-    "format:check": "prettier --check src tests scripts public tenant-public docs/openapi.json"
+    "format": "prettier --write src tests scripts public tenant-public docs/openapi.json e2e playwright.config.ts",
+    "format:check": "prettier --check src tests scripts public tenant-public docs/openapi.json e2e playwright.config.ts",
+    "journey:check": "tsc -p e2e/tsconfig.json --noEmit && playwright test --list --reporter=list",
+    "journey:test": "tsx scripts/journey/run.ts",
+    "journey:cleanup": "tsx scripts/journey/cleanup.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1139.0",
@@ -36,10 +39,12 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/node": "^26.6.2",
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "@types/ws": "^8.18.1",
+    "@xterm/headless": "6.0.0",
     "prettier": "^3.9.9",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"

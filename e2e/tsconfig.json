@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "noEmit": true, "rootDir": ".." },
+  "include": [
+    "./**/*.ts",
+    "../playwright.config.ts",
+    "../scripts/journey/**/*.ts",
+    "../tests/journey-harness.test.ts"
+  ]
+}
