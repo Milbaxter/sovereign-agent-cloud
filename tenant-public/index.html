@@ -9,41 +9,45 @@
     <main>
       <h1>Your OpenClaw agent</h1>
       <p id="notice" role="status"></p>
+      <a id="account-link" hidden>Back to your account</a>
       <section id="setup" hidden>
-        <h2>Finish setup</h2>
+        <h2>1. Connect your model</h2>
         <p>
-          This is the standard OpenClaw wizard. Your model keys and messaging
-          credentials stay on this VM.
+          The setup wizard opens in a new tab. Follow its prompts to choose your
+          model connection, then return here. Keep this page open until setup is
+          complete.
         </p>
         <a class="button" href="/terminal/" target="_blank" rel="noopener"
-          >Open setup wizard</a
+          >Open setup wizard in a new tab</a
         >
         <p id="mode"></p>
-        <h2>Open your dashboard</h2>
+        <h2>2. Open your dashboard</h2>
         <p>
-          Copy the Gateway token into the OpenClaw connection settings when
-          requested.
+          Copy your connection key, open the dashboard in a new tab, and paste
+          it into the Gateway token field in connection settings. Connect, then
+          return here.
         </p>
         <button id="copy">Copy Gateway token</button
         ><a class="button" href="/" target="_blank" rel="noopener"
-          >Open OpenClaw</a
+          >Open dashboard in a new tab</a
         >
-        <h2>Pair this browser</h2>
+        <h2>3. Approve this browser</h2>
         <p>
           Open the dashboard, then return here and find this browser. Only a
           device connection observed in your current signed-in session can be
           approved.
         </p>
         <button id="devices">Find this browser</button>
-        <pre id="pending"></pre>
-        <form id="pair">
-          <label>Request ID<input name="requestId" readonly required /></label
-          ><label
-            >Device public key<input
-              name="publicKey"
-              readonly
-              required /></label
-          ><button>Approve this browser</button>
+        <p id="pending" role="status"></p>
+        <form id="pair" hidden>
+          <details>
+            <summary>Connection details</summary>
+            <label>Request ID<input name="requestId" readonly required /></label
+            ><label
+              >Device public key<input name="publicKey" readonly required
+            /></label>
+          </details>
+          <button>Approve this browser</button>
         </form>
         <p>
           Telegram and WhatsApp are configured in OpenClaw. iMessage

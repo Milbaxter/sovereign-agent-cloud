@@ -202,3 +202,29 @@ a {
 [hidden] {
   display: none !important;
 }
+
+button,
+.button {
+  touch-action: manipulation;
+}
+[aria-busy="true"] {
+  cursor: progress;
+}
+#connection:not(:empty) {
+  padding: 14px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+}
+@media (max-width: 480px) {
+  main {
+    padding: 20px 14px;
+  }
+  section {
+    padding: 18px;
+  }
+  button,
+  .button {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+}

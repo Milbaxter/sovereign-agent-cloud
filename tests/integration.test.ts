@@ -1463,3 +1463,151 @@ test("billing portal rejects old sessions before contacting Stripe", async () =>
     await app.close();
   }
 });
+
+test("managed streaming forwards the first chunk before completion and logs only timing metadata", async (t) => {
+  const key = token();
+  await db.query("UPDATE tenants SET inference_key_hash=$2 WHERE id=$1", [
+    tenant,
+    hash(key),
+  ]);
+  await transaction(db, (tx) => credit(tx, account, "timing-topup", 10000n));
+  const original = globalThis.fetch;
+  process.env.TEST_INFERENCE_KEY = "fixture-provider-key";
+  const encoder = new TextEncoder();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  globalThis.fetch = async () =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+          c.enqueue(
+            encoder.encode(
+              'data: {"choices":[{"delta":{"content":"private-stream-answer"}}]}\n\n',
+            ),
+          );
+        },
+      }),
+      { headers: { "content-type": "text/event-stream" } },
+    );
+  const app = await buildApp(c, db, [model]);
+  let record: any;
+  let logged!: () => void;
+  const logReady = new Promise<void>((resolve) => {
+    logged = resolve;
+  });
+  app.log.info = ((data: any) => {
+    if (data.event === "inference_timing") {
+      record = data;
+      logged();
+    }
+  }) as any;
+  t.after(async () => {
+    try {
+      controller?.close();
+    } catch {}
+    globalThis.fetch = original;
+    delete process.env.TEST_INFERENCE_KEY;
+    await app.close();
+  });
+  const address = await app.listen({ host: "127.0.0.1", port: 0 });
+  const response = await original(`${address}/v1/chat/completions`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${key}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: model.id,
+      stream: true,
+      messages: [{ role: "user", content: "private-prompt" }],
+    }),
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(response.status, 200);
+  const reader = response.body!.getReader();
+  const first = await reader.read();
+  assert.match(new TextDecoder().decode(first.value), /private-stream-answer/);
+  assert.equal(record, undefined, "request is still streaming");
+  controller.enqueue(
+    encoder.encode(
+      'data: {"usage":{"prompt_tokens":100,"completion_tokens":20}}\n\ndata: [DONE]\n\n',
+    ),
+  );
+  controller.close();
+  while (!(await reader.read()).done) {}
+  await logReady;
+  assert.deepEqual(
+    Object.keys(record).sort(),
+    [
+      "event",
+      "requestId",
+      "streaming",
+      "outcome",
+      "headersMs",
+      "firstUpstreamChunkMs",
+      "generationMs",
+      "totalMs",
+      "settlement",
+    ].sort(),
+  );
+  assert.equal(record.outcome, "completed");
+  assert.equal(record.settlement, "processed");
+  assert.equal(record.streaming, true);
+  assert.ok(record.headersMs >= 0);
+  assert.ok(record.firstUpstreamChunkMs >= record.headersMs);
+  assert.ok(record.generationMs >= record.firstUpstreamChunkMs);
+  assert.ok(record.totalMs >= record.generationMs);
+  assert.equal(record.requestId, response.headers.get("x-request-id"));
+  assert.doesNotMatch(JSON.stringify(record), /private-|fixture-provider-key/);
+  assert.equal(
+    (await db.query("SELECT balance FROM wallets")).rows[0].balance,
+    "9850",
+  );
+});
+
+test("provider failures emit timing metadata without claiming a completed generation", async (t) => {
+  const key = token();
+  await db.query("UPDATE tenants SET inference_key_hash=$2 WHERE id=$1", [
+    tenant,
+    hash(key),
+  ]);
+  await transaction(db, (tx) =>
+    credit(tx, account, "timing-failure-topup", 10000n),
+  );
+  const original = globalThis.fetch;
+  process.env.TEST_INFERENCE_KEY = "fixture-provider-key";
+  globalThis.fetch = async () => {
+    throw Error("private provider URL and diagnostic");
+  };
+  const app = await buildApp(c, db, [model]);
+  t.after(async () => {
+    globalThis.fetch = original;
+    delete process.env.TEST_INFERENCE_KEY;
+    await app.close();
+  });
+  const records: any[] = [];
+  app.log.info = ((data: any) => {
+    if (data.event === "inference_timing") records.push(data);
+  }) as any;
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/chat/completions",
+    headers: { authorization: `Bearer ${key}` },
+    payload: {
+      model: model.id,
+      messages: [{ role: "user", content: "private-prompt" }],
+    },
+  });
+  assert.equal(response.statusCode, 500);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].outcome, "failed");
+  assert.equal(records[0].headersMs, null);
+  assert.equal(records[0].firstUpstreamChunkMs, null);
+  assert.equal(records[0].generationMs, null);
+  assert.equal(records[0].settlement, "processed");
+  assert.doesNotMatch(JSON.stringify(records), /private|fixture-provider-key/);
+  assert.equal(
+    (await db.query("SELECT state FROM requests")).rows[0].state,
+    "unknown",
+  );
+});

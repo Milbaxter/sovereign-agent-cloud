@@ -20,6 +20,8 @@ The next product layer is a personal knowledge base users can inspect, correct, 
 
 The [privacy and security claims policy](docs/PRIVACY-SECURITY.md) records administrator access, model/embedding destinations, key custody, and evidence required before making customer promises. Current managed hosting is not zero knowledge.
 
+The [customer readiness improvements](docs/CUSTOMER-READINESS.md) document portal recovery, guided pairing and managed inference timing, along with their remaining acceptance limits.
+
 ## Local development
 
 Requires Node 24+, Docker, and PostgreSQL 17. No cloud credentials are required for the integration suite; it uses local PostgreSQL and fake payment/cloud adapters.
