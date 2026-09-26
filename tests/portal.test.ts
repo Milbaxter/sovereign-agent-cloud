@@ -313,3 +313,23 @@ test("malformed account data preserves the last good view and keeps retrying", a
   await page.polling()!();
   assert.equal(page.get("#connection").textContent, "");
 });
+
+test("post-mutation refresh cannot reuse an account read that started before the mutation", async () => {
+  const page = await portal("ready");
+  const original = page.context.fetch;
+  let release!: () => void;
+  let reads = 0;
+  page.context.fetch = async (path, options) => {
+    if (path === "/api/me" && ++reads === 1) {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    }
+    return original(path, options);
+  };
+  const oldRead = runInNewContext("refresh()", page.context);
+  const afterMutation = runInNewContext("refresh(true)", page.context);
+  release();
+  await Promise.all([oldRead, afterMutation]);
+  assert.equal(reads, 2);
+});

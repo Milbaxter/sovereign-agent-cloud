@@ -105,8 +105,8 @@ let catalog, me, timer, renderedAgent, renderedTenantId;
 const initialMode = new URLSearchParams(location.search).get("mode");
 if (["byok", "credits"].includes(initialMode)) $("#mode").value = initialMode;
 let refreshing;
-function refresh() {
-  if (refreshing) return refreshing;
+function refresh(force = false) {
+  if (refreshing) return force ? refreshing.then(() => refresh()) : refreshing;
   clearTimeout(timer);
   let failed = false;
   refreshing = refreshAccount()
@@ -308,7 +308,7 @@ async function refreshAccount() {
         )
       ) {
         await api(`/api/tenants/${t.id}/cancel`, {});
-        await refresh();
+        await refresh(true);
       }
     });
     area.append(section);
@@ -348,7 +348,7 @@ $("#reauth").onclick = run(async () => {
 });
 $("#logout").onclick = run(async () => {
   await api("/api/auth/logout", {});
-  await refresh();
+  await refresh(true);
 });
 $("#purchase-form").onsubmit = run(() =>
   jump("/api/checkout", {
