@@ -48,6 +48,7 @@ export function inference(app: FastifyInstance, db: DB, catalog: Model[]) {
   app.register(
     async (api) => {
       api.addHook("preHandler", async (req) => {
+        (req as any).inferenceStarted = performance.now();
         const bearer = req.headers.authorization?.match(
           /^Bearer ([A-Za-z0-9_-]+)$/,
         )?.[1];
@@ -101,6 +102,12 @@ export function inference(app: FastifyInstance, db: DB, catalog: Model[]) {
             model,
             maxOutput,
           );
+          const began = (req as any).inferenceStarted as number;
+          const elapsed = () => Math.round(performance.now() - began);
+          let headersMs: number | null = null;
+          let firstUpstreamChunkMs: number | null = null;
+          let generationMs: number | null = null;
+          let outcome = "failed";
           let usage: any = null,
             started = false;
           try {
@@ -123,6 +130,7 @@ export function inference(app: FastifyInstance, db: DB, catalog: Model[]) {
                 signal: AbortSignal.timeout(180_000),
               },
             );
+            headersMs = elapsed();
             if (!response.ok) {
               // Rejected HTTP requests are unbilled; ambiguous network failures remain unknown.
               if ([400, 401, 403, 404, 413, 422, 429].includes(response.status))
@@ -133,6 +141,8 @@ export function inference(app: FastifyInstance, db: DB, catalog: Model[]) {
             }
             if (!body.stream) {
               const data: any = await response.json();
+              generationMs = elapsed();
+              outcome = "completed";
               usage = data.usage;
               data.model = model.id;
               return data;
@@ -149,6 +159,8 @@ export function inference(app: FastifyInstance, db: DB, catalog: Model[]) {
               decoder = new TextDecoder();
             if (!response.body) throw Error("EMPTY_UPSTREAM");
             for await (const chunk of response.body) {
+              if (chunk.byteLength && firstUpstreamChunkMs === null)
+                firstUpstreamChunkMs = elapsed();
               parser.push(decoder.decode(chunk, { stream: true }));
               // Keep collecting usage after a browser disconnect; never retry a partial generation.
               if (!reply.raw.destroyed) {
@@ -158,13 +170,35 @@ export function inference(app: FastifyInstance, db: DB, catalog: Model[]) {
             }
             parser.push(decoder.decode() + "\n");
             usage = parser.usage;
+            generationMs = elapsed();
+            outcome = reply.raw.destroyed ? "client_disconnected" : "completed";
             if (!reply.raw.destroyed) reply.raw.end();
           } catch (e) {
             if (started) {
               if (!reply.raw.destroyed) reply.raw.destroy();
             } else throw e;
           } finally {
-            await settle(db, id, model, usage);
+            let settlement = "failed";
+            try {
+              await settle(db, id, model, usage);
+              settlement = "processed";
+            } finally {
+              // Fixed, content-free fields only. First chunk is not necessarily a visible token.
+              app.log.info(
+                {
+                  event: "inference_timing",
+                  requestId: id,
+                  streaming: body.stream === true,
+                  outcome,
+                  headersMs,
+                  firstUpstreamChunkMs,
+                  generationMs,
+                  totalMs: elapsed(),
+                  settlement,
+                },
+                "Managed inference timing",
+              );
+            }
           }
         },
       );
